@@ -2,19 +2,23 @@ package com.example.cleartone
 
 import android.media.AudioFormat
 import android.media.AudioTrack
-import android.media.MediaPlayer // <--- IMPORTANT: New import
-import android.os.Build // <-- ADD THIS LINE
+import android.media.MediaPlayer
+import android.os.Build
 import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import kotlin.math.PI
+import kotlin.math.pow
 import kotlin.math.sin
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.cleartone/audio"
-    private var mediaPlayer: MediaPlayer? = null // <--- Replaced AudioTrack
+    private var mediaPlayer: MediaPlayer? = null
     private var audioTrack: AudioTrack? = null
+
+    // Assume 80 dB is our maximum reference level
+    private val MAX_DB = 80.0
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -23,16 +27,20 @@ class MainActivity : FlutterActivity() {
                 call,
                 result ->
             when (call.method) {
-                // We've changed the method name to "playFile"
                 "playFile" -> {
                     val filePath = call.argument<String>("filePath")
                     val channel = call.argument<String>("channel") ?: "left"
+                    val amplitude = call.argument<Double>("amplitude")
 
-                    if (filePath == null) {
-                        result.error("INVALID_ARGUMENT", "File path cannot be null", null)
+                    if (filePath == null || amplitude == null) {
+                        result.error(
+                            "INVALID_ARGUMENT",
+                            "File path and amplitude are required",
+                            null
+                        )
                     } else {
                         try {
-                            playFile(filePath, channel)
+                            playFile(filePath, channel, amplitude)
                             result.success(null)
                         } catch (e: Exception) {
                             Log.e("MediaPlayer", "Error playing file: $filePath", e)
@@ -44,7 +52,6 @@ class MainActivity : FlutterActivity() {
                         }
                     }
                 }
-                // We've changed the method name to "stopFile"
                 "stopFile" -> {
                     stopFile()
                     result.success(null)
@@ -67,42 +74,29 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun playFile(filePath: String, channel: String) {
-        // Stop and release any player that might be running
+    private fun playFile(filePath: String, channel: String, amplitudeDb: Double) {
         stopFile()
+
+        // Convert DB to a linear volume scalar (0.0 to 1.0)
+        // We map our dB range (0-80) to the linear scale.
+        val volume = 10.0.pow((amplitudeDb - MAX_DB) / 20.0).toFloat().coerceIn(0.0f, 1.0f)
 
         mediaPlayer =
             MediaPlayer().apply {
                 setDataSource(filePath)
 
-                // This is the key part for panning
-                // We must check the Android version
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    // For Android 9.0 (API 28) and newer
-                    when (channel) {
-                        "left" -> setVolume(1.0f, 0.0f) // Max volume left, Mute right
-                        "right" -> setVolume(0.0f, 1.0f) // Mute left, Max volume right
-                        else -> setVolume(1.0f, 1.0f) // Default stereo
-                    }
-                } else {
-                    // For older Android versions, use the deprecated 'setVolume'
-                    @Suppress("DEPRECATION")
-                    when (channel) {
-                        "left" -> setVolume(1.0f, 0.0f)
-                        "right" -> setVolume(0.0f, 1.0f)
-                        else -> setVolume(1.0f, 1.0f)
-                    }
-                }
+                val leftVolume = if (channel == "right") 0.0f else volume
+                val rightVolume = if (channel == "left") 0.0f else volume
 
-                // Set a listener to clean up when the song is done
+                setVolume(leftVolume, rightVolume)
+
                 setOnCompletionListener { stopFile() }
 
-                prepare() // Prepare the file for playback
-                start() // Play the file
+                prepare()
+                start()
             }
     }
 
-    // This is the new stop function for MediaPlayer
     private fun stopFile() {
         mediaPlayer?.stop()
         mediaPlayer?.release()
@@ -110,37 +104,34 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun playTone(frequency: Double, amplitudeDb: Double, channel: String, duration: Int) {
-        println("playTone called with frequency: $frequency, amplitude: $amplitudeDb, channel: $channel, duration: $duration")
         val sampleRate = 44100
         val numSamples = (duration * sampleRate) / 1000
         val samples = ShortArray(numSamples * 2) // Stereo
 
-        // Convert dB to linear amplitude (simplified)
-        val amplitude = (Math.pow(10.0, amplitudeDb / 20.0) * 0.8).toFloat()
+        // Convert dB to linear amplitude, treating MAX_DB as 0 dBFS (full scale)
+        // A safety margin of 0.95 is added to prevent clipping.
+        val linearAmplitude = (10.0.pow((amplitudeDb - MAX_DB) / 20.0) * 0.95).toFloat()
 
-        // Generate sine wave
         for (i in 0 until numSamples) {
-            val sample =
-                (sin(2.0 * PI * frequency * i / sampleRate) * amplitude * Short.MAX_VALUE)
+            val sampleValue =
+                (sin(2.0 * PI * frequency * i / sampleRate) * linearAmplitude * Short.MAX_VALUE)
                     .toInt()
                     .toShort()
 
-            // Stereo panning
-            samples[i * 2] = if (channel == "left") sample else 0 // Left channel
-            samples[i * 2 + 1] = if (channel == "right") sample else 0 // Right channel
+            samples[i * 2] = if (channel == "left") sampleValue else 0
+            samples[i * 2 + 1] = if (channel == "right") sampleValue else 0
         }
 
-        // Create AudioTrack
         val bufferSize = samples.size * 2
+
+        audioTrack?.release() // Release previous track if any
 
         audioTrack =
             AudioTrack.Builder()
                 .setAudioAttributes(
                     android.media.AudioAttributes.Builder()
                         .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
-                        .setContentType(
-                            android.media.AudioAttributes.CONTENT_TYPE_MUSIC
-                        )
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
                         .build()
                 )
                 .setAudioFormat(
@@ -151,10 +142,9 @@ class MainActivity : FlutterActivity() {
                         .build()
                 )
                 .setBufferSizeInBytes(bufferSize)
-                .setTransferMode(AudioTrack.MODE_STATIC) // <-- The main fix!
+                .setTransferMode(AudioTrack.MODE_STATIC)
                 .build()
 
-        // For MODE_STATIC, you write the data *first*, then play.
         audioTrack?.write(samples, 0, samples.size)
         audioTrack?.play()
     }

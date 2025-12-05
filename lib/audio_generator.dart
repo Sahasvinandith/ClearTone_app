@@ -8,11 +8,13 @@ class AudioGenerator {
   Future<void> playFile({
     required String filePath, // The *native* path to the file on the device
     required String channel, // 'left' or 'right'
+    required double amplitude, // dB (e.g., 40)
   }) async {
     try {
       await platform.invokeMethod('playFile', {
         'filePath': filePath,
         'channel': channel,
+        'amplitude': amplitude,
       });
     } catch (e) {
       print('Error playing file: $e');
