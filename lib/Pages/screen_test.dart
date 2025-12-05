@@ -32,6 +32,7 @@ class _ScreenTestState extends State<ScreenTest> {
   bool _isAscending = false;
   int _reversals = 0;
   int _lastHeardAmplitude = 0;
+  bool _reversalCountingStarted = false;
 
   final Map<int, int> _leftEarResults = {};
   final Map<int, int> _rightEarResults = {};
@@ -122,20 +123,41 @@ class _ScreenTestState extends State<ScreenTest> {
   }
 
   void _userHeardTone(bool heard) {
-    if (heard) {
-      _reversals++;
-      _lastHeardAmplitude = _currentAmplitude.toInt();
-      _currentAmplitude -= 10; // Decrease by 10 dB
-      _isAscending = false;
-    } else {
-      if (!_isAscending) {
-        _reversals++;
-        _isAscending = true;
+    if (!_reversalCountingStarted) {
+      if (heard) {
+        _lastHeardAmplitude = _currentAmplitude.toInt();
+        _currentAmplitude -= 10;
+        _playNextTone();
+      } else {
+        // First 'No', start reversal process
+        _reversalCountingStarted = true;
+        _isAscending = true; // Start ascending
+        _currentAmplitude += 5;
+        _playNextTone();
       }
-      _currentAmplitude += 5; // Increase by 5 dB
+      return;
     }
 
-    if (_reversals >= 5) { // Simplified threshold detection
+    if (heard) {
+      _lastHeardAmplitude = _currentAmplitude.toInt();
+      if (_isAscending) { // We were going up and they heard it
+        _reversals++;
+        _isAscending = false; // Reverse direction to descending
+        _currentAmplitude -= 10;
+      } else { // We were going down and they still heard it
+        _currentAmplitude -= 10;
+      }
+    } else { // Not heard
+      if (!_isAscending) { // We were going down and they missed it
+        _reversals++;
+        _isAscending = true; // Reverse direction to ascending
+        _currentAmplitude += 5;
+      } else { // We were going up and they still can't hear it
+        _currentAmplitude += 5;
+      }
+    }
+
+    if (_reversals >= 3) { // Using 3 reversals
       _recordResultAndMoveOn();
     } else {
       _playNextTone();
@@ -171,6 +193,7 @@ class _ScreenTestState extends State<ScreenTest> {
     _isAscending = false;
     _reversals = 0;
     _lastHeardAmplitude = 0;
+    _reversalCountingStarted = false;
   }
 
   void _finishTest() {
