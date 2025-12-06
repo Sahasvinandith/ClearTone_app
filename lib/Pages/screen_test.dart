@@ -5,6 +5,7 @@ import '../models/profile.dart';
 import '../models/hearing_test_result.dart';
 import '../audio_generator.dart';
 import '../path_finder.dart' as pathf;
+import '../profile_storage.dart';
 
 class ScreenTest extends StatefulWidget {
   final Profile profile;
@@ -17,6 +18,7 @@ class ScreenTest extends StatefulWidget {
 
 class _ScreenTestState extends State<ScreenTest> {
   final AudioGenerator _audioGenerator = AudioGenerator();
+  final ProfileStorage _profileStorage = ProfileStorage();
   String? _whiteNoisePath;
 
   // Test state
@@ -94,7 +96,7 @@ class _ScreenTestState extends State<ScreenTest> {
   }
 
   void _startTest() {
-    _countdown = 0; // <-- THE FIX IS HERE
+    _countdown = 0;
     _currentEar = "left";
     _resetFrequencyVariables();
     _playNextTone();
@@ -196,11 +198,13 @@ class _ScreenTestState extends State<ScreenTest> {
     _reversalCountingStarted = false;
   }
 
-  void _finishTest() {
+  Future<void> _finishTest() async {
     final result = HearingTestResult(
         leftEarResults: _leftEarResults,
         rightEarResults: _rightEarResults);
     widget.profile.testResult = result;
+
+    await _profileStorage.saveProfile(widget.profile);
 
     setState(() {
       _isTesting = false;
@@ -208,6 +212,15 @@ class _ScreenTestState extends State<ScreenTest> {
     });
 
     Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ResultsScreen(profile: widget.profile),
+      ),
+    );
+  }
+
+  void _viewResults() {
+    Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => ResultsScreen(profile: widget.profile),
@@ -239,6 +252,14 @@ class _ScreenTestState extends State<ScreenTest> {
         ElevatedButton(onPressed: _showSoundCheckDialog, child: const Text("Check Earbuds")),
         const SizedBox(height: 20),
         ElevatedButton(onPressed: _startCountdown, child: const Text("Start Test")),
+        if (widget.profile.testResult != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 20.0),
+            child: ElevatedButton(
+              onPressed: _viewResults,
+              child: const Text("Watch my Ear Profile"),
+            ),
+          ),
       ],
     );
   }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/profile.dart';
+import '../profile_storage.dart';
 import 'screen_test.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -10,16 +11,31 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  final List<Profile> _profiles = [];
+  final ProfileStorage _profileStorage = ProfileStorage();
+  List<Profile> _profiles = [];
   final TextEditingController _nameController = TextEditingController();
 
-  void _addProfile(String name) {
+  @override
+  void initState() {
+    super.initState();
+    _loadProfiles();
+  }
+
+  Future<void> _loadProfiles() async {
+    final profiles = await _profileStorage.loadProfiles();
+    setState(() {
+      _profiles = profiles;
+    });
+  }
+
+  Future<void> _addProfile(String name) async {
     if (name.isNotEmpty) {
-      setState(() {
-        _profiles.add(Profile(name: name));
-      });
+      final newProfile = Profile(name: name);
+      final updatedProfiles = List<Profile>.from(_profiles)..add(newProfile);
+      await _profileStorage.saveProfiles(updatedProfiles);
       _nameController.clear();
       Navigator.of(context).pop();
+      _loadProfiles();
     }
   }
 
@@ -53,10 +69,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        // Pass the selected profile to the test screen
         builder: (context) => ScreenTest(profile: profile),
       ),
-    );
+    ).then((_) => _loadProfiles());
   }
 
   @override

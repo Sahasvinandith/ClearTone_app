@@ -151,7 +151,7 @@ class _ResultsScreenState extends State<ResultsScreen> with SingleTickerProvider
                     SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
                       child: SizedBox(
-                        width: 600,
+                        width: 1000,
                         child: Padding(
                           padding: const EdgeInsets.only(top: 16.0, right: 16.0),
                           child: LineChart(
@@ -163,7 +163,7 @@ class _ResultsScreenState extends State<ResultsScreen> with SingleTickerProvider
                     SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
                       child: SizedBox(
-                        width: 600,
+                        width: 1000,
                         child: Padding(
                           padding: const EdgeInsets.only(top: 16.0, right: 16.0),
                           child: LineChart(
