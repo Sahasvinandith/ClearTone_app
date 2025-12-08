@@ -84,13 +84,12 @@ class MainActivity : FlutterActivity() {
         mediaPlayer =
             MediaPlayer().apply {
                 setDataSource(filePath)
+                isLooping = true
 
                 val leftVolume = if (channel == "right") 0.0f else volume
                 val rightVolume = if (channel == "left") 0.0f else volume
 
                 setVolume(leftVolume, rightVolume)
-
-                setOnCompletionListener { stopFile() }
 
                 prepare()
                 start()

@@ -26,6 +26,7 @@ class _ScreenTestState extends State<ScreenTest> {
   String _testStatus = "";
   Timer? _countdownTimer;
   int _countdown = 3;
+  String? current_test_ear= null;
 
   // Hughson-Westlake state
   final List<int> _frequencies = [1000, 2000, 4000, 8000, 500, 250];
@@ -108,12 +109,18 @@ class _ScreenTestState extends State<ScreenTest> {
     });
 
     String nonTestEar = _currentEar == "left" ? "right" : "left";
-    if (_whiteNoisePath != null) {
-      _audioGenerator.playFile(
-          filePath: _whiteNoisePath!,
-          channel: nonTestEar,
-          amplitude: 30.0 // Masking amplitude
-          );
+    print("Current Ear: $_currentEar _current_test_ear: $current_test_ear");
+
+    if (_currentEar != current_test_ear){
+      current_test_ear = _currentEar;
+      if (_whiteNoisePath != null) {
+        _audioGenerator.playFile(
+            filePath: _whiteNoisePath!,
+            channel: nonTestEar,
+            amplitude: 30.0 // Masking amplitude
+        );
+      }
+
     }
 
     _audioGenerator.playTone(
@@ -205,6 +212,8 @@ class _ScreenTestState extends State<ScreenTest> {
     widget.profile.testResult = result;
 
     await _profileStorage.saveProfile(widget.profile);
+
+    _audioGenerator.stopFile();
 
     setState(() {
       _isTesting = false;
