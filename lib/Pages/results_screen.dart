@@ -19,7 +19,7 @@ class _ResultsScreenState extends State<ResultsScreen> with SingleTickerProvider
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
   }
 
   @override
@@ -106,6 +106,97 @@ class _ResultsScreenState extends State<ResultsScreen> with SingleTickerProvider
     );
   }
 
+  // Helper to create the line chart data
+  LineChartData _create_combined_ChartData(Map<int, int> left_data, Color left_color,Map<int, int> right_data, Color right_color) {
+    // Sort entries by frequency for correct line drawing
+    final left_sortedEntries = left_data.entries.toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
+    final left_spots = left_sortedEntries
+        .map((e) => FlSpot(e.key.toDouble(), e.value.toDouble()))
+        .toList();
+    final right_sortedEntries = right_data.entries.toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
+    final right_spots = right_sortedEntries
+        .map((e) => FlSpot(e.key.toDouble(), e.value.toDouble()))
+        .toList();
+
+    return LineChartData(
+      gridData: const FlGridData(show: true),
+      titlesData: FlTitlesData(
+        leftTitles: AxisTitles(
+          sideTitles: SideTitles(
+            showTitles: true,
+            reservedSize: 40,
+            getTitlesWidget: (value, meta) {
+              return Text('${value.toInt()} dB');
+            },
+          ),
+        ),
+        bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: 30,
+                getTitlesWidget: (value, meta) {
+                  const style = TextStyle(
+                    fontSize: 10,
+                  );
+                  String text;
+                  switch (value.toInt()) {
+                    case 250:
+                      text = '250';
+                      break;
+                    case 500:
+                      text = '500';
+                      break;
+                    case 1000:
+                      text = '1k';
+                      break;
+                    case 2000:
+                      text = '2k';
+                      break;
+                    case 4000:
+                      text = '4k';
+                      break;
+                    case 8000:
+                      text = '8k';
+                      break;
+                    default:
+                      return Container();
+                  }
+                  return SideTitleWidget(
+                      axisSide: meta.axisSide,
+                      space: 4,
+                      child: Text(text, style: style));
+                })),
+        topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+      ),
+      borderData: FlBorderData(show: true),
+      lineBarsData: [
+        LineChartBarData(
+          spots: left_spots,
+          isCurved: true,
+          color: left_color,
+          barWidth: 4,
+          isStrokeCapRound: true,
+          belowBarData: BarAreaData(show: false),
+        ),
+        LineChartBarData(
+          spots: right_spots,
+          isCurved: true,
+          color: right_color,
+          barWidth: 4,
+          isStrokeCapRound: true,
+          belowBarData: BarAreaData(show: false),
+        ),
+      ],
+      minX: 0,
+      maxX: 8250, // Give some space on the right
+      minY: 100, // Inverted Y-axis
+      maxY: -10, // Inverted Y-axis
+    );
+  }
+
   // Function to handle sharing
   void _shareResults(BuildContext context) {
     final result = widget.profile.testResult;
@@ -132,6 +223,7 @@ class _ResultsScreenState extends State<ResultsScreen> with SingleTickerProvider
           tabs: const [
             Tab(text: 'Left Ear'),
             Tab(text: 'Right Ear'),
+            Tab(text: 'Combined View')
           ],
         ),
       ),
@@ -168,6 +260,18 @@ class _ResultsScreenState extends State<ResultsScreen> with SingleTickerProvider
                           padding: const EdgeInsets.only(top: 16.0, right: 16.0),
                           child: LineChart(
                               _createChartData(result.rightEarResults, Colors.red)),
+                        ),
+                      ),
+                    ),
+                    // Right Ear Chart
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: SizedBox(
+                        width: 1000,
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 16.0, right: 16.0),
+                          child: LineChart(
+                              _create_combined_ChartData(result.leftEarResults, Colors.blue,result.rightEarResults, Colors.red)),
                         ),
                       ),
                     ),

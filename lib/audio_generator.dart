@@ -34,6 +34,7 @@ class AudioGenerator {
     required int duration, // milliseconds
   }) async {
     try {
+      print("Tone playing");
       await platform.invokeMethod('playTone', {
         'frequency': frequency,
         'amplitude': amplitude,
