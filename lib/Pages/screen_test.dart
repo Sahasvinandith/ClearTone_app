@@ -105,7 +105,7 @@ class _ScreenTestState extends State<ScreenTest> {
 
   void _playNextTone() {
     setState(() {
-      _testStatus = "Playing at ${_frequencies[_currentFrequencyIndex]} Hz...";
+      _testStatus = "Playing at ${_frequencies[_currentFrequencyIndex]} Hz...\n Amplitude $_currentAmplitude dB";
     });
 
     String nonTestEar = _currentEar == "left" ? "right" : "left";
