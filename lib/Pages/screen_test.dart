@@ -26,7 +26,7 @@ class _ScreenTestState extends State<ScreenTest> {
   String _testStatus = "";
   Timer? _countdownTimer;
   int _countdown = 3;
-  String? current_test_ear= null;
+  String? currentTestEar;
 
   // Hughson-Westlake state
   final List<int> _frequencies = [1000, 2000, 4000, 8000, 500, 250];
@@ -47,9 +47,18 @@ class _ScreenTestState extends State<ScreenTest> {
     _initialize();
   }
 
+  @override
+  void dispose() {
+    _countdownTimer?.cancel();
+    _audioGenerator.stopFile();
+    _audioGenerator.stopTone();
+    super.dispose();
+  }
+
   void _initialize() async {
     // Get the path to the white noise file
     _whiteNoisePath = await pathf.getFilePathFromAsset('assets/audio/white_noice.wav');
+    if (!mounted) return;
     setState(() {
       _testStatus = "Welcome, ${widget.profile.name}. Ready to start?";
     });
@@ -109,10 +118,9 @@ class _ScreenTestState extends State<ScreenTest> {
     });
 
     String nonTestEar = _currentEar == "left" ? "right" : "left";
-    print("Current Ear: $_currentEar _current_test_ear: $current_test_ear");
 
-    if (_currentEar != current_test_ear){
-      current_test_ear = _currentEar;
+    if (_currentEar != currentTestEar){
+      currentTestEar = _currentEar;
       if (_whiteNoisePath != null) {
         _audioGenerator.playFile(
             filePath: _whiteNoisePath!,
@@ -214,6 +222,8 @@ class _ScreenTestState extends State<ScreenTest> {
     await _profileStorage.saveProfile(widget.profile);
 
     _audioGenerator.stopFile();
+
+    if (!mounted) return;
 
     setState(() {
       _isTesting = false;
