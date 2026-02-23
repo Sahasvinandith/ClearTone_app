@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:share_plus/share_plus.dart';
-import '../models/hearing_test_result.dart';
 import '../models/profile.dart';
 
 class ResultsScreen extends StatefulWidget {
@@ -13,7 +12,8 @@ class ResultsScreen extends StatefulWidget {
   State<ResultsScreen> createState() => _ResultsScreenState();
 }
 
-class _ResultsScreenState extends State<ResultsScreen> with SingleTickerProviderStateMixin {
+class _ResultsScreenState extends State<ResultsScreen>
+    with SingleTickerProviderStateMixin {
   late TabController _tabController;
 
   @override
@@ -50,43 +50,46 @@ class _ResultsScreenState extends State<ResultsScreen> with SingleTickerProvider
           ),
         ),
         bottomTitles: AxisTitles(
-            sideTitles: SideTitles(
-                showTitles: true,
-                reservedSize: 30,
-                getTitlesWidget: (value, meta) {
-                  const style = TextStyle(
-                    fontSize: 10,
-                  );
-                  String text;
-                  switch (value.toInt()) {
-                    case 250:
-                      text = '250';
-                      break;
-                    case 500:
-                      text = '500';
-                      break;
-                    case 1000:
-                      text = '1k';
-                      break;
-                    case 2000:
-                      text = '2k';
-                      break;
-                    case 4000:
-                      text = '4k';
-                      break;
-                    case 8000:
-                      text = '8k';
-                      break;
-                    default:
-                      return Container();
-                  }
-                  return SideTitleWidget(
-                      axisSide: meta.axisSide,
-                      space: 4,
-                      child: Text(text, style: style));
-                })),
+          sideTitles: SideTitles(
+            showTitles: true,
+            reservedSize: 30,
+            getTitlesWidget: (value, meta) {
+              const style = TextStyle(fontSize: 10);
+              String text;
+              switch (value.toInt()) {
+                case 250:
+                  text = '250';
+                  break;
+                case 500:
+                  text = '500';
+                  break;
+                case 1000:
+                  text = '1k';
+                  break;
+                case 2000:
+                  text = '2k';
+                  break;
+                case 4000:
+                  text = '4k';
+                  break;
+                case 8000:
+                  text = '8k';
+                  break;
+                default:
+                  return Container();
+              }
+              return SideTitleWidget(
+                axisSide: meta.axisSide,
+                space: 4,
+                child: Text(text, style: style),
+              );
+            },
+          ),
+        ),
         topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-        rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        rightTitles: const AxisTitles(
+          sideTitles: SideTitles(showTitles: false),
+        ),
       ),
       borderData: FlBorderData(show: true),
       lineBarsData: [
@@ -107,16 +110,21 @@ class _ResultsScreenState extends State<ResultsScreen> with SingleTickerProvider
   }
 
   // Helper to create the line chart data
-  LineChartData _create_combined_ChartData(Map<int, int> left_data, Color left_color,Map<int, int> right_data, Color right_color) {
+  LineChartData _createCombinedChartData(
+    Map<int, int> leftData,
+    Color leftColor,
+    Map<int, int> rightData,
+    Color rightColor,
+  ) {
     // Sort entries by frequency for correct line drawing
-    final left_sortedEntries = left_data.entries.toList()
+    final leftSortedEntries = leftData.entries.toList()
       ..sort((a, b) => a.key.compareTo(b.key));
-    final left_spots = left_sortedEntries
+    final leftSpots = leftSortedEntries
         .map((e) => FlSpot(e.key.toDouble(), e.value.toDouble()))
         .toList();
-    final right_sortedEntries = right_data.entries.toList()
+    final rightSortedEntries = rightData.entries.toList()
       ..sort((a, b) => a.key.compareTo(b.key));
-    final right_spots = right_sortedEntries
+    final rightSpots = rightSortedEntries
         .map((e) => FlSpot(e.key.toDouble(), e.value.toDouble()))
         .toList();
 
@@ -133,58 +141,61 @@ class _ResultsScreenState extends State<ResultsScreen> with SingleTickerProvider
           ),
         ),
         bottomTitles: AxisTitles(
-            sideTitles: SideTitles(
-                showTitles: true,
-                reservedSize: 30,
-                getTitlesWidget: (value, meta) {
-                  const style = TextStyle(
-                    fontSize: 10,
-                  );
-                  String text;
-                  switch (value.toInt()) {
-                    case 250:
-                      text = '250';
-                      break;
-                    case 500:
-                      text = '500';
-                      break;
-                    case 1000:
-                      text = '1k';
-                      break;
-                    case 2000:
-                      text = '2k';
-                      break;
-                    case 4000:
-                      text = '4k';
-                      break;
-                    case 8000:
-                      text = '8k';
-                      break;
-                    default:
-                      return Container();
-                  }
-                  return SideTitleWidget(
-                      axisSide: meta.axisSide,
-                      space: 4,
-                      child: Text(text, style: style));
-                })),
+          sideTitles: SideTitles(
+            showTitles: true,
+            reservedSize: 30,
+            getTitlesWidget: (value, meta) {
+              const style = TextStyle(fontSize: 10);
+              String text;
+              switch (value.toInt()) {
+                case 250:
+                  text = '250';
+                  break;
+                case 500:
+                  text = '500';
+                  break;
+                case 1000:
+                  text = '1k';
+                  break;
+                case 2000:
+                  text = '2k';
+                  break;
+                case 4000:
+                  text = '4k';
+                  break;
+                case 8000:
+                  text = '8k';
+                  break;
+                default:
+                  return Container();
+              }
+              return SideTitleWidget(
+                axisSide: meta.axisSide,
+                space: 4,
+                child: Text(text, style: style),
+              );
+            },
+          ),
+        ),
         topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-        rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        rightTitles: const AxisTitles(
+          sideTitles: SideTitles(showTitles: false),
+        ),
       ),
       borderData: FlBorderData(show: true),
       lineBarsData: [
         LineChartBarData(
-          spots: left_spots,
+          spots: leftSpots,
           isCurved: true,
-          color: left_color,
+          color: leftColor,
           barWidth: 4,
           isStrokeCapRound: true,
           belowBarData: BarAreaData(show: false),
         ),
         LineChartBarData(
-          spots: right_spots,
+          spots: rightSpots,
           isCurved: true,
-          color: right_color,
+          color: rightColor,
           barWidth: 4,
           isStrokeCapRound: true,
           belowBarData: BarAreaData(show: false),
@@ -206,7 +217,9 @@ class _ResultsScreenState extends State<ResultsScreen> with SingleTickerProvider
     report += 'Left Ear:\n';
     result.leftEarResults.forEach((freq, db) => report += '$freq Hz: $db dB\n');
     report += '\nRight Ear:\n';
-    result.rightEarResults.forEach((freq, db) => report += '$freq Hz: $db dB\n');
+    result.rightEarResults.forEach(
+      (freq, db) => report += '$freq Hz: $db dB\n',
+    );
 
     Share.share(report);
   }
@@ -223,7 +236,7 @@ class _ResultsScreenState extends State<ResultsScreen> with SingleTickerProvider
           tabs: const [
             Tab(text: 'Left Ear'),
             Tab(text: 'Right Ear'),
-            Tab(text: 'Combined View')
+            Tab(text: 'Combined View'),
           ],
         ),
       ),
@@ -231,8 +244,10 @@ class _ResultsScreenState extends State<ResultsScreen> with SingleTickerProvider
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
-            Text('Audiogram for ${widget.profile.name}',
-                style: Theme.of(context).textTheme.headlineSmall),
+            Text(
+              'Audiogram for ${widget.profile.name}',
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
             const SizedBox(height: 20),
             if (result != null)
               Expanded(
@@ -245,9 +260,16 @@ class _ResultsScreenState extends State<ResultsScreen> with SingleTickerProvider
                       child: SizedBox(
                         width: 1000,
                         child: Padding(
-                          padding: const EdgeInsets.only(top: 16.0, right: 16.0),
+                          padding: const EdgeInsets.only(
+                            top: 16.0,
+                            right: 16.0,
+                          ),
                           child: LineChart(
-                              _createChartData(result.leftEarResults, Colors.blue)),
+                            _createChartData(
+                              result.leftEarResults,
+                              Colors.blue,
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -257,9 +279,16 @@ class _ResultsScreenState extends State<ResultsScreen> with SingleTickerProvider
                       child: SizedBox(
                         width: 1000,
                         child: Padding(
-                          padding: const EdgeInsets.only(top: 16.0, right: 16.0),
+                          padding: const EdgeInsets.only(
+                            top: 16.0,
+                            right: 16.0,
+                          ),
                           child: LineChart(
-                              _createChartData(result.rightEarResults, Colors.red)),
+                            _createChartData(
+                              result.rightEarResults,
+                              Colors.red,
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -269,9 +298,18 @@ class _ResultsScreenState extends State<ResultsScreen> with SingleTickerProvider
                       child: SizedBox(
                         width: 1000,
                         child: Padding(
-                          padding: const EdgeInsets.only(top: 16.0, right: 16.0),
+                          padding: const EdgeInsets.only(
+                            top: 16.0,
+                            right: 16.0,
+                          ),
                           child: LineChart(
-                              _create_combined_ChartData(result.leftEarResults, Colors.blue,result.rightEarResults, Colors.red)),
+                            _createCombinedChartData(
+                              result.leftEarResults,
+                              Colors.blue,
+                              result.rightEarResults,
+                              Colors.red,
+                            ),
+                          ),
                         ),
                       ),
                     ),

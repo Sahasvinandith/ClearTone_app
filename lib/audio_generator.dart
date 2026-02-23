@@ -1,5 +1,5 @@
-// lib/audio_generator.dart
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 
 class AudioGenerator {
   static const platform = MethodChannel('com.cleartone/audio');
@@ -17,7 +17,7 @@ class AudioGenerator {
         'amplitude': amplitude,
       });
     } catch (e) {
-      print('Error playing file: $e');
+      debugPrint('Error playing file: $e');
       rethrow;
     }
   }
@@ -34,7 +34,7 @@ class AudioGenerator {
     required int duration, // milliseconds
   }) async {
     try {
-      print("Tone playing");
+      debugPrint("Tone playing");
       await platform.invokeMethod('playTone', {
         'frequency': frequency,
         'amplitude': amplitude,
@@ -42,7 +42,7 @@ class AudioGenerator {
         'duration': duration,
       });
     } catch (e) {
-      print('Error playing tone: $e');
+      debugPrint('Error playing tone: $e');
       rethrow;
     }
   }

@@ -33,6 +33,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final newProfile = Profile(name: name);
       final updatedProfiles = List<Profile>.from(_profiles)..add(newProfile);
       await _profileStorage.saveProfiles(updatedProfiles);
+      if (!mounted) return;
       _nameController.clear();
       Navigator.of(context).pop();
       _loadProfiles();
@@ -68,9 +69,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void _navigateToTest(Profile profile) {
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (context) => ScreenTest(profile: profile),
-      ),
+      MaterialPageRoute(builder: (context) => ScreenTest(profile: profile)),
     ).then((_) => _loadProfiles());
   }
 
