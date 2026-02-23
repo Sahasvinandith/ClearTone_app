@@ -38,14 +38,27 @@ class _ResultsScreenState extends State<ResultsScreen>
         .toList();
 
     return LineChartData(
-      gridData: const FlGridData(show: true),
+      gridData: FlGridData(
+        show: true,
+        getDrawingHorizontalLine: (value) =>
+            const FlLine(color: Color(0xFF2A2A2A), strokeWidth: 1),
+        getDrawingVerticalLine: (value) =>
+            const FlLine(color: Color(0xFF2A2A2A), strokeWidth: 1),
+      ),
       titlesData: FlTitlesData(
         leftTitles: AxisTitles(
           sideTitles: SideTitles(
             showTitles: true,
             reservedSize: 40,
             getTitlesWidget: (value, meta) {
-              return Text('${value.toInt()} dB');
+              return Text(
+                '${value.toInt()} dB',
+                style: const TextStyle(
+                  color: Color(0xFFA0A0A0),
+                  fontSize: 10,
+                  fontWeight: FontWeight.w500,
+                ),
+              );
             },
           ),
         ),
@@ -54,7 +67,12 @@ class _ResultsScreenState extends State<ResultsScreen>
             showTitles: true,
             reservedSize: 30,
             getTitlesWidget: (value, meta) {
-              const style = TextStyle(fontSize: 10);
+              const style = TextStyle(
+                fontSize: 10,
+                color: Color(0xFFA0A0A0),
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.5,
+              );
               String text;
               switch (value.toInt()) {
                 case 250:
@@ -64,16 +82,16 @@ class _ResultsScreenState extends State<ResultsScreen>
                   text = '500';
                   break;
                 case 1000:
-                  text = '1k';
+                  text = '1K';
                   break;
                 case 2000:
-                  text = '2k';
+                  text = '2K';
                   break;
                 case 4000:
-                  text = '4k';
+                  text = '4K';
                   break;
                 case 8000:
-                  text = '8k';
+                  text = '8K';
                   break;
                 default:
                   return Container();
@@ -91,15 +109,23 @@ class _ResultsScreenState extends State<ResultsScreen>
           sideTitles: SideTitles(showTitles: false),
         ),
       ),
-      borderData: FlBorderData(show: true),
+      borderData: FlBorderData(
+        show: true,
+        border: Border.all(color: const Color(0xFF3A3A3A)),
+      ),
       lineBarsData: [
         LineChartBarData(
           spots: spots,
-          isCurved: true,
+          isCurved: false, // brutalist: sharp straight lines instead of curves
           color: color,
-          barWidth: 4,
-          isStrokeCapRound: true,
+          barWidth: 3,
+          isStrokeCapRound: false, // zero radius
           belowBarData: BarAreaData(show: false),
+          dotData: FlDotData(
+            show: true,
+            getDotPainter: (spot, percent, barData, index) =>
+                FlDotSquarePainter(size: 8, color: color, strokeWidth: 0),
+          ),
         ),
       ],
       minX: 0,
@@ -129,14 +155,27 @@ class _ResultsScreenState extends State<ResultsScreen>
         .toList();
 
     return LineChartData(
-      gridData: const FlGridData(show: true),
+      gridData: FlGridData(
+        show: true,
+        getDrawingHorizontalLine: (value) =>
+            const FlLine(color: Color(0xFF2A2A2A), strokeWidth: 1),
+        getDrawingVerticalLine: (value) =>
+            const FlLine(color: Color(0xFF2A2A2A), strokeWidth: 1),
+      ),
       titlesData: FlTitlesData(
         leftTitles: AxisTitles(
           sideTitles: SideTitles(
             showTitles: true,
             reservedSize: 40,
             getTitlesWidget: (value, meta) {
-              return Text('${value.toInt()} dB');
+              return Text(
+                '${value.toInt()} dB',
+                style: const TextStyle(
+                  color: Color(0xFFA0A0A0),
+                  fontSize: 10,
+                  fontWeight: FontWeight.w500,
+                ),
+              );
             },
           ),
         ),
@@ -145,7 +184,12 @@ class _ResultsScreenState extends State<ResultsScreen>
             showTitles: true,
             reservedSize: 30,
             getTitlesWidget: (value, meta) {
-              const style = TextStyle(fontSize: 10);
+              const style = TextStyle(
+                fontSize: 10,
+                color: Color(0xFFA0A0A0),
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.5,
+              );
               String text;
               switch (value.toInt()) {
                 case 250:
@@ -155,16 +199,16 @@ class _ResultsScreenState extends State<ResultsScreen>
                   text = '500';
                   break;
                 case 1000:
-                  text = '1k';
+                  text = '1K';
                   break;
                 case 2000:
-                  text = '2k';
+                  text = '2K';
                   break;
                 case 4000:
-                  text = '4k';
+                  text = '4K';
                   break;
                 case 8000:
-                  text = '8k';
+                  text = '8K';
                   break;
                 default:
                   return Container();
@@ -182,29 +226,42 @@ class _ResultsScreenState extends State<ResultsScreen>
           sideTitles: SideTitles(showTitles: false),
         ),
       ),
-      borderData: FlBorderData(show: true),
+      borderData: FlBorderData(
+        show: true,
+        border: Border.all(color: const Color(0xFF3A3A3A)),
+      ),
       lineBarsData: [
         LineChartBarData(
           spots: leftSpots,
-          isCurved: true,
+          isCurved: false,
           color: leftColor,
-          barWidth: 4,
-          isStrokeCapRound: true,
+          barWidth: 3,
+          isStrokeCapRound: false,
           belowBarData: BarAreaData(show: false),
+          dotData: FlDotData(
+            show: true,
+            getDotPainter: (spot, percent, barData, index) =>
+                FlDotSquarePainter(size: 8, color: leftColor, strokeWidth: 0),
+          ),
         ),
         LineChartBarData(
           spots: rightSpots,
-          isCurved: true,
+          isCurved: false,
           color: rightColor,
-          barWidth: 4,
-          isStrokeCapRound: true,
+          barWidth: 3,
+          isStrokeCapRound: false,
           belowBarData: BarAreaData(show: false),
+          dotData: FlDotData(
+            show: true,
+            getDotPainter: (spot, percent, barData, index) =>
+                FlDotSquarePainter(size: 8, color: rightColor, strokeWidth: 0),
+          ),
         ),
       ],
       minX: 0,
-      maxX: 8250, // Give some space on the right
-      minY: 100, // Inverted Y-axis
-      maxY: -10, // Inverted Y-axis
+      maxX: 8250,
+      minY: 100,
+      maxY: -10,
     );
   }
 
@@ -230,101 +287,129 @@ class _ResultsScreenState extends State<ResultsScreen>
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Test Results'),
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: 'Left Ear'),
-            Tab(text: 'Right Ear'),
-            Tab(text: 'Combined View'),
-          ],
-        ),
+        title: const Text('TEST RESULTS', style: TextStyle(letterSpacing: 2)),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            Text(
-              'Audiogram for ${widget.profile.name}',
-              style: Theme.of(context).textTheme.headlineSmall,
+      body: Column(
+        children: [
+          // iOS Pill style TabBar container
+          Container(
+            padding: const EdgeInsets.fromLTRB(21, 12, 21, 21),
+            child: Container(
+              height: 48,
+              decoration: BoxDecoration(
+                color: const Color(0xFF1C1C1C),
+                borderRadius: BorderRadius.circular(36),
+                border: Border.all(color: const Color(0xFF2A2A2A)),
+              ),
+              child: TabBar(
+                controller: _tabController,
+                indicatorPadding: const EdgeInsets.all(4),
+                tabs: const [
+                  Tab(text: 'LEFT EAR'),
+                  Tab(text: 'RIGHT EAR'),
+                  Tab(text: 'COMBINED'),
+                ],
+              ),
             ),
-            const SizedBox(height: 20),
-            if (result != null)
-              Expanded(
-                child: TabBarView(
-                  controller: _tabController,
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 28.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    // Left Ear Chart
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: SizedBox(
-                        width: 1000,
-                        child: Padding(
-                          padding: const EdgeInsets.only(
-                            top: 16.0,
-                            right: 16.0,
-                          ),
-                          child: LineChart(
-                            _createChartData(
-                              result.leftEarResults,
-                              Colors.blue,
-                            ),
-                          ),
-                        ),
-                      ),
+                    Container(
+                      width: 3,
+                      height: 14,
+                      color: const Color(0xFFD4AF37),
                     ),
-                    // Right Ear Chart
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: SizedBox(
-                        width: 1000,
-                        child: Padding(
-                          padding: const EdgeInsets.only(
-                            top: 16.0,
-                            right: 16.0,
-                          ),
-                          child: LineChart(
-                            _createChartData(
-                              result.rightEarResults,
-                              Colors.red,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    // Right Ear Chart
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: SizedBox(
-                        width: 1000,
-                        child: Padding(
-                          padding: const EdgeInsets.only(
-                            top: 16.0,
-                            right: 16.0,
-                          ),
-                          child: LineChart(
-                            _createCombinedChartData(
-                              result.leftEarResults,
-                              Colors.blue,
-                              result.rightEarResults,
-                              Colors.red,
-                            ),
-                          ),
-                        ),
+                    const SizedBox(width: 12),
+                    Text(
+                      'AUDIOGRAM FOR ${widget.profile.name.toUpperCase()}',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 1.5,
+                        color: const Color(0xFFA0A0A0),
                       ),
                     ),
                   ],
                 ),
-              ),
-            if (result == null) const Text('No test results available.'),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () => _shareResults(context),
-              child: const Text('Share Results'),
+                const SizedBox(height: 16),
+              ],
             ),
-          ],
-        ),
+          ),
+          if (result != null)
+            Expanded(
+              child: TabBarView(
+                controller: _tabController,
+                children: [
+                  // Left Ear Chart
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: SizedBox(
+                      width: 1000,
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 16.0, right: 16.0),
+                        child: LineChart(
+                          _createChartData(
+                            result.leftEarResults,
+                            const Color(0xFFD4AF37), // Primary Gold
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  // Right Ear Chart
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: SizedBox(
+                      width: 1000,
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 16.0, right: 16.0),
+                        child: LineChart(
+                          _createChartData(
+                            result.rightEarResults,
+                            Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  // Right Ear Chart
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: SizedBox(
+                      width: 1000,
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 16.0, right: 16.0),
+                        child: LineChart(
+                          _createCombinedChartData(
+                            result.leftEarResults,
+                            const Color(0xFFD4AF37),
+                            result.rightEarResults,
+                            Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          if (result == null) const Text('NO TEST RESULTS AVAILABLE.'),
+          const SizedBox(height: 20),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 32.0),
+            child: ElevatedButton(
+              onPressed: () => _shareResults(context),
+              child: const Text('SHARE RESULTS'),
+            ),
+          ),
+        ],
       ),
+      // NO PADDING AT BOTTOM OF BODY SINCE IT AFFECTS TABS
     );
   }
 }

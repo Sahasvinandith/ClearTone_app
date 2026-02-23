@@ -57,7 +57,9 @@ class _ScreenTestState extends State<ScreenTest> {
 
   void _initialize() async {
     // Get the path to the white noise file
-    _whiteNoisePath = await pathf.getFilePathFromAsset('assets/audio/white_noice.wav');
+    _whiteNoisePath = await pathf.getFilePathFromAsset(
+      'assets/audio/white_noice.wav',
+    );
     if (!mounted) return;
     setState(() {
       _testStatus = "Welcome, ${widget.profile.name}. Ready to start?";
@@ -68,21 +70,35 @@ class _ScreenTestState extends State<ScreenTest> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text("Check Your Earbuds"),
-        content: const Text("Make sure you can hear the sound in the correct ear."),
+        title: const Text(
+          "CHECK YOUR EARBUDS",
+          style: TextStyle(letterSpacing: 1),
+        ),
+        content: const Text(
+          "Make sure you can hear the sound in the correct ear.",
+          style: TextStyle(color: Colors.white70),
+        ),
         actions: [
           TextButton(
-            child: const Text("Check Left Ear"),
+            child: const Text("CHECK LEFT EAR"),
             onPressed: () => _audioGenerator.playTone(
-                frequency: 1000, amplitude: 40, channel: 'left', duration: 1000),
+              frequency: 1000,
+              amplitude: 40,
+              channel: 'left',
+              duration: 1000,
+            ),
           ),
           TextButton(
-            child: const Text("Check Right Ear"),
+            child: const Text("CHECK RIGHT EAR"),
             onPressed: () => _audioGenerator.playTone(
-                frequency: 1000, amplitude: 40, channel: 'right', duration: 1000),
+              frequency: 1000,
+              amplitude: 40,
+              channel: 'right',
+              duration: 1000,
+            ),
           ),
           TextButton(
-            child: const Text("Done"),
+            child: const Text("DONE"),
             onPressed: () => Navigator.of(context).pop(),
           ),
         ],
@@ -114,21 +130,21 @@ class _ScreenTestState extends State<ScreenTest> {
 
   void _playNextTone() {
     setState(() {
-      _testStatus = "Playing at ${_frequencies[_currentFrequencyIndex]} Hz...\n Amplitude $_currentAmplitude dB";
+      _testStatus =
+          "Playing at ${_frequencies[_currentFrequencyIndex]} Hz...\n Amplitude $_currentAmplitude dB";
     });
 
     String nonTestEar = _currentEar == "left" ? "right" : "left";
 
-    if (_currentEar != currentTestEar){
+    if (_currentEar != currentTestEar) {
       currentTestEar = _currentEar;
       if (_whiteNoisePath != null) {
         _audioGenerator.playFile(
-            filePath: _whiteNoisePath!,
-            channel: nonTestEar,
-            amplitude: 30.0 // Masking amplitude
+          filePath: _whiteNoisePath!,
+          channel: nonTestEar,
+          amplitude: 30.0, // Masking amplitude
         );
       }
-
     }
 
     _audioGenerator.playTone(
@@ -157,24 +173,30 @@ class _ScreenTestState extends State<ScreenTest> {
 
     if (heard) {
       _lastHeardAmplitude = _currentAmplitude.toInt();
-      if (_isAscending) { // We were going up and they heard it
+      if (_isAscending) {
+        // We were going up and they heard it
         _reversals++;
         _isAscending = false; // Reverse direction to descending
         _currentAmplitude -= 10;
-      } else { // We were going down and they still heard it
+      } else {
+        // We were going down and they still heard it
         _currentAmplitude -= 10;
       }
-    } else { // Not heard
-      if (!_isAscending) { // We were going down and they missed it
+    } else {
+      // Not heard
+      if (!_isAscending) {
+        // We were going down and they missed it
         _reversals++;
         _isAscending = true; // Reverse direction to ascending
         _currentAmplitude += 5;
-      } else { // We were going up and they still can't hear it
+      } else {
+        // We were going up and they still can't hear it
         _currentAmplitude += 5;
       }
     }
 
-    if (_reversals >= 3) { // Using 3 reversals
+    if (_reversals >= 3) {
+      // Using 3 reversals
       _recordResultAndMoveOn();
     } else {
       _playNextTone();
@@ -215,8 +237,9 @@ class _ScreenTestState extends State<ScreenTest> {
 
   Future<void> _finishTest() async {
     final result = HearingTestResult(
-        leftEarResults: _leftEarResults,
-        rightEarResults: _rightEarResults);
+      leftEarResults: _leftEarResults,
+      rightEarResults: _rightEarResults,
+    );
     widget.profile.testResult = result;
 
     await _profileStorage.saveProfile(widget.profile);
@@ -250,13 +273,11 @@ class _ScreenTestState extends State<ScreenTest> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text("Hi, ${widget.profile.name}")),
+      appBar: AppBar(title: Text("HI, ${widget.profile.name.toUpperCase()}")),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(20.0),
-          child: _isTesting
-              ? _buildTestView()
-              : _buildPreTestView(),
+          child: _isTesting ? _buildTestView() : _buildPreTestView(),
         ),
       ),
     );
@@ -266,17 +287,30 @@ class _ScreenTestState extends State<ScreenTest> {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Text(_testStatus, style: Theme.of(context).textTheme.headlineSmall, textAlign: TextAlign.center,),
-        const SizedBox(height: 40),
-        ElevatedButton(onPressed: _showSoundCheckDialog, child: const Text("Check Earbuds")),
-        const SizedBox(height: 20),
-        ElevatedButton(onPressed: _startCountdown, child: const Text("Start Test")),
+        Text(
+          _testStatus,
+          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+            fontWeight: FontWeight.w700,
+            letterSpacing: 1,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 48),
+        ElevatedButton(
+          onPressed: _showSoundCheckDialog,
+          child: const Text("CHECK EARBUDS"),
+        ),
+        const SizedBox(height: 16),
+        ElevatedButton(
+          onPressed: _startCountdown,
+          child: const Text("START TEST"),
+        ),
         if (widget.profile.testResult != null)
           Padding(
-            padding: const EdgeInsets.only(top: 20.0),
-            child: ElevatedButton(
+            padding: const EdgeInsets.only(top: 32.0),
+            child: TextButton(
               onPressed: _viewResults,
-              child: const Text("Watch my Ear Profile"),
+              child: const Text("VIEW MY EAR PROFILE"),
             ),
           ),
       ],
@@ -285,21 +319,52 @@ class _ScreenTestState extends State<ScreenTest> {
 
   Widget _buildTestView() {
     if (_countdown > 0) {
-      return Text("Starting in $_countdown...", style: Theme.of(context).textTheme.headlineMedium);
+      return Text(
+        "STARTING IN $_countdown...",
+        style: Theme.of(
+          context,
+        ).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w700),
+      );
     }
 
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Text(_testStatus, style: Theme.of(context).textTheme.headlineSmall, textAlign: TextAlign.center,),
-        const SizedBox(height: 50),
-        const Text("Did you hear the sound?", style: TextStyle(fontSize: 20)),
-        const SizedBox(height: 20),
+        Text(
+          _testStatus,
+          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+            fontWeight: FontWeight.w700,
+            color: const Color(0xFFD4AF37),
+            letterSpacing: 1,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 64),
+        const Text(
+          "DID YOU HEAR THE SOUND?",
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 1.5,
+          ),
+        ),
+        const SizedBox(height: 32),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: [
-            ElevatedButton(onPressed: () => _userHeardTone(true), child: const Text("Yes")),
-            ElevatedButton(onPressed: () => _userHeardTone(false), child: const Text("No")),
+            ElevatedButton(
+              onPressed: () => _userHeardTone(true),
+              child: const Text("YES"),
+            ),
+            ElevatedButton(
+              onPressed: () => _userHeardTone(false),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF282828),
+                foregroundColor: Colors.white,
+                side: const BorderSide(color: Color(0xFF2A2A2A)),
+              ),
+              child: const Text("NO"),
+            ),
           ],
         ),
       ],
