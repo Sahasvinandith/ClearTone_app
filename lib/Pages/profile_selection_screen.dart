@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
 import '../models/profile.dart';
 import '../profile_storage.dart';
-import 'screen_test.dart';
+import 'home_wrapper.dart';
 
-class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({super.key});
+class ProfileSelectionScreen extends StatefulWidget {
+  const ProfileSelectionScreen({super.key});
 
   @override
-  State<ProfileScreen> createState() => _ProfileScreenState();
+  State<ProfileSelectionScreen> createState() => _ProfileSelectionScreenState();
 }
 
-class _ProfileScreenState extends State<ProfileScreen> {
+class _ProfileSelectionScreenState extends State<ProfileSelectionScreen> {
   final ProfileStorage _profileStorage = ProfileStorage();
   List<Profile> _profiles = [];
   final TextEditingController _nameController = TextEditingController();
@@ -23,19 +23,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _loadProfiles() async {
     final profiles = await _profileStorage.loadProfiles();
+    if (!mounted) return;
     setState(() {
       _profiles = profiles;
     });
   }
 
-  Future<void> _addProfile(String name) async {
+  void _addProfile(String name) async {
     if (name.isNotEmpty) {
       final newProfile = Profile(name: name);
-      final updatedProfiles = List<Profile>.from(_profiles)..add(newProfile);
-      await _profileStorage.saveProfiles(updatedProfiles);
-      if (!mounted) return;
+      await _profileStorage.saveProfile(newProfile);
       _nameController.clear();
-      Navigator.of(context).pop();
+      if (!mounted) return;
+      Navigator.of(context).pop(); // Close dialog
       _loadProfiles();
     }
   }
@@ -70,11 +70,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  void _navigateToTest(Profile profile) {
-    Navigator.push(
+  void _navigateToHome(Profile profile) {
+    Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (context) => ScreenTest(profile: profile)),
-    ).then((_) => _loadProfiles());
+      MaterialPageRoute(builder: (context) => HomeWrapper(profile: profile)),
+    );
   }
 
   @override
@@ -104,7 +104,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               itemBuilder: (context, index) {
                 final profile = _profiles[index];
                 return InkWell(
-                  onTap: () => _navigateToTest(profile),
+                  onTap: () => _navigateToHome(profile),
                   child: Container(
                     padding: const EdgeInsets.all(16),
                     decoration: const BoxDecoration(color: Color(0xFF1C1C1C)),

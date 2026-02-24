@@ -22,7 +22,6 @@ class _ScreenTestState extends State<ScreenTest> {
   String? _whiteNoisePath;
 
   // Test state
-  bool _isTesting = false;
   String _testStatus = "";
   Timer? _countdownTimer;
   int _countdown = 3;
@@ -61,54 +60,11 @@ class _ScreenTestState extends State<ScreenTest> {
       'assets/audio/white_noice.wav',
     );
     if (!mounted) return;
-    setState(() {
-      _testStatus = "Welcome, ${widget.profile.name}. Ready to start?";
-    });
-  }
-
-  void _showSoundCheckDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text(
-          "CHECK YOUR EARBUDS",
-          style: TextStyle(letterSpacing: 1),
-        ),
-        content: const Text(
-          "Make sure you can hear the sound in the correct ear.",
-          style: TextStyle(color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            child: const Text("CHECK LEFT EAR"),
-            onPressed: () => _audioGenerator.playTone(
-              frequency: 1000,
-              amplitude: 40,
-              channel: 'left',
-              duration: 1000,
-            ),
-          ),
-          TextButton(
-            child: const Text("CHECK RIGHT EAR"),
-            onPressed: () => _audioGenerator.playTone(
-              frequency: 1000,
-              amplitude: 40,
-              channel: 'right',
-              duration: 1000,
-            ),
-          ),
-          TextButton(
-            child: const Text("DONE"),
-            onPressed: () => Navigator.of(context).pop(),
-          ),
-        ],
-      ),
-    );
+    _startCountdown();
   }
 
   void _startCountdown() {
     setState(() {
-      _isTesting = true;
       _countdown = 3;
     });
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -253,20 +209,10 @@ class _ScreenTestState extends State<ScreenTest> {
     if (!mounted) return;
 
     setState(() {
-      _isTesting = false;
       _testStatus = "Test Complete!";
     });
 
     Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ResultsScreen(profile: widget.profile),
-      ),
-    );
-  }
-
-  void _viewResults() {
-    Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => ResultsScreen(profile: widget.profile),
@@ -281,43 +227,9 @@ class _ScreenTestState extends State<ScreenTest> {
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(20.0),
-          child: _isTesting ? _buildTestView() : _buildPreTestView(),
+          child: _buildTestView(),
         ),
       ),
-    );
-  }
-
-  Widget _buildPreTestView() {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Text(
-          _testStatus,
-          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-            fontWeight: FontWeight.w700,
-            letterSpacing: 1,
-          ),
-          textAlign: TextAlign.center,
-        ),
-        const SizedBox(height: 48),
-        ElevatedButton(
-          onPressed: _showSoundCheckDialog,
-          child: const Text("CHECK EARBUDS"),
-        ),
-        const SizedBox(height: 16),
-        ElevatedButton(
-          onPressed: _startCountdown,
-          child: const Text("START TEST"),
-        ),
-        if (widget.profile.testResults.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 32.0),
-            child: TextButton(
-              onPressed: _viewResults,
-              child: const Text("VIEW MY EAR PROFILE"),
-            ),
-          ),
-      ],
     );
   }
 

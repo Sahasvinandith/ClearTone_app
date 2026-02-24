@@ -51,7 +51,7 @@ class _ResultsScreenState extends State<ResultsScreen>
       // If we have 3 tests: i=0 (oldest), i=1, i=2 (newest)
       // opacity = (i + 1) / results.length  => 0.33, 0.66, 1.0 (for 3 tests)
       final double opacity = (i + 1) / results.length;
-      final Color color = baseColor.withOpacity(opacity);
+      final Color color = baseColor.withAlpha((opacity * 255).toInt());
 
       lineBars.add(
         LineChartBarData(
@@ -77,10 +77,18 @@ class _ResultsScreenState extends State<ResultsScreen>
     return LineChartData(
       gridData: FlGridData(
         show: true,
-        getDrawingHorizontalLine: (value) =>
-            const FlLine(color: Color(0xFF2A2A2A), strokeWidth: 1),
-        getDrawingVerticalLine: (value) =>
-            const FlLine(color: Color(0xFF2A2A2A), strokeWidth: 1),
+        drawVerticalLine: true,
+        drawHorizontalLine: true,
+        horizontalInterval: 20,
+        verticalInterval: 1,
+        getDrawingHorizontalLine: (value) => FlLine(
+          color: const Color(0xFF3A3A3A).withValues(alpha: 0.5),
+          strokeWidth: 1,
+        ),
+        getDrawingVerticalLine: (value) => FlLine(
+          color: const Color(0xFF3A3A3A).withValues(alpha: 0.5),
+          strokeWidth: 1,
+        ),
       ),
       titlesData: FlTitlesData(
         leftTitles: AxisTitles(
@@ -168,8 +176,10 @@ class _ResultsScreenState extends State<ResultsScreen>
 
     for (int i = 0; i < results.length; i++) {
       final double opacity = (i + 1) / results.length;
-      final Color leftColor = leftBaseColor.withOpacity(opacity);
-      final Color rightColor = rightBaseColor.withOpacity(opacity);
+      final Color leftColor = leftBaseColor.withAlpha((opacity * 255).toInt());
+      final Color rightColor = rightBaseColor.withAlpha(
+        (opacity * 255).toInt(),
+      );
       final double barWidth = i == results.length - 1 ? 3 : 2;
       final double dotSize = i == results.length - 1 ? 8 : 6;
 
@@ -231,10 +241,18 @@ class _ResultsScreenState extends State<ResultsScreen>
     return LineChartData(
       gridData: FlGridData(
         show: true,
-        getDrawingHorizontalLine: (value) =>
-            const FlLine(color: Color(0xFF2A2A2A), strokeWidth: 1),
-        getDrawingVerticalLine: (value) =>
-            const FlLine(color: Color(0xFF2A2A2A), strokeWidth: 1),
+        drawVerticalLine: true,
+        drawHorizontalLine: true,
+        horizontalInterval: 20,
+        verticalInterval: 1,
+        getDrawingHorizontalLine: (value) => FlLine(
+          color: const Color(0xFF3A3A3A).withValues(alpha: 0.5),
+          strokeWidth: 1,
+        ),
+        getDrawingVerticalLine: (value) => FlLine(
+          color: const Color(0xFF3A3A3A).withValues(alpha: 0.5),
+          strokeWidth: 1,
+        ),
       ),
       titlesData: FlTitlesData(
         leftTitles: AxisTitles(

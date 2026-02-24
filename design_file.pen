@@ -1,0 +1,169 @@
+{
+  "version": "2.8",
+  "children": [
+    {
+      "type": "frame",
+      "id": "bi8Au",
+      "x": 133,
+      "y": 12,
+      "name": "Frame",
+      "clip": true,
+      "width": 391,
+      "height": 582,
+      "fill": "#413c3cff",
+      "layout": "none",
+      "children": [
+        {
+          "type": "frame",
+          "id": "BLAyd",
+          "x": 52,
+          "y": 63,
+          "name": "Frame 1",
+          "clip": true,
+          "width": 288,
+          "height": 150,
+          "fill": "#FFFFFF",
+          "layout": "none",
+          "children": [
+            {
+              "type": "rectangle",
+              "id": "pTpHu",
+              "x": -12,
+              "y": 0,
+              "fill": "#3d3b3bff",
+              "width": 349,
+              "height": 26
+            },
+            {
+              "type": "text",
+              "id": "h82Wd",
+              "x": 64,
+              "y": 0,
+              "fill": "#f9b539ff",
+              "content": "Left   |  Right  | All",
+              "fontFamily": "Inter",
+              "fontSize": 16,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "context",
+              "id": "dmrXL",
+              "x": 5.341481854838776,
+              "y": 21.27746975806454,
+              "width": 250,
+              "height": 195,
+              "content": "Hearing test results should be displayed here"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "YTcjv",
+          "x": 138,
+          "y": 17,
+          "fill": "#e68722e8",
+          "content": "Hello ! Sahas",
+          "fontFamily": "Inter",
+          "fontSize": 16,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "dBRqE",
+          "x": -5.684341886080802e-14,
+          "y": 539,
+          "name": "Navbar",
+          "clip": true,
+          "width": 391,
+          "height": 43,
+          "fill": "#FFFFFF",
+          "layout": "none"
+        },
+        {
+          "type": "frame",
+          "id": "1txm1",
+          "x": 66,
+          "y": 269,
+          "name": "Check Earbuds button",
+          "clip": true,
+          "width": 244,
+          "height": 43,
+          "fill": "#FFFFFF",
+          "layout": "none",
+          "children": [
+            {
+              "type": "text",
+              "id": "EhAlw",
+              "x": 64,
+              "y": 12,
+              "fill": "#000000",
+              "content": "Check EarBuds",
+              "fontFamily": "Inter",
+              "fontSize": 16,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "e3Vdd",
+          "x": 66,
+          "y": 337,
+          "name": "Check Earbuds button",
+          "clip": true,
+          "width": 244,
+          "height": 43,
+          "fill": "#FFFFFF",
+          "layout": "none",
+          "children": [
+            {
+              "type": "text",
+              "id": "b6ZyI",
+              "x": 85,
+              "y": 12,
+              "fill": "#000000",
+              "content": "Start Test",
+              "fontFamily": "Inter",
+              "fontSize": 16,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "FOM0w",
+          "x": 66,
+          "y": 416,
+          "name": "Check Earbuds button",
+          "clip": true,
+          "width": 244,
+          "height": 43,
+          "fill": "#FFFFFF",
+          "layout": "none",
+          "children": [
+            {
+              "type": "text",
+              "id": "B6fPL",
+              "x": 45,
+              "y": 11,
+              "context": "ddsd",
+              "fill": "#000000",
+              "content": "Check My ear Profile",
+              "fontFamily": "Inter",
+              "fontSize": 16,
+              "fontWeight": "normal"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "themes": {
+    "Theme": [
+      "Default"
+    ],
+    "Theme-1": [
+      "Default"
+    ]
+  }
+}

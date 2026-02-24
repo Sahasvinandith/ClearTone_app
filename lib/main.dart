@@ -1,4 +1,4 @@
-import 'package:cleartone/Pages/profile_screen.dart';
+import 'package:cleartone/Pages/profile_selection_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -126,7 +126,7 @@ class MyApp extends StatelessWidget {
           dividerColor: Colors.transparent,
         ),
       ),
-      home: const ProfileScreen(),
+      home: const ProfileSelectionScreen(),
     );
   }
 }

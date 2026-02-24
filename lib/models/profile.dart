@@ -7,6 +7,17 @@ class Profile {
   Profile({required this.name, List<HearingTestResult>? testResults})
     : testResults = testResults ?? [];
 
+  HearingTestResult? get testResult {
+    if (testResults.isEmpty) return null;
+    return testResults.last; // Get the most recent one for the dashboard
+  }
+
+  set testResult(HearingTestResult? result) {
+    if (result != null) {
+      testResults.add(result);
+    }
+  }
+
   // Factory constructor to create a Profile from a JSON string
   factory Profile.fromJson(Map<String, dynamic> jsonData) {
     List<HearingTestResult> testResults = [];
