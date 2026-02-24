@@ -355,6 +355,50 @@ class _ResultsScreenState extends State<ResultsScreen>
     Share.share(report);
   }
 
+  // Function to show results in a popup
+  void _showResultsPopup(BuildContext context) {
+    final results = widget.profile.testResults;
+    if (results.isEmpty) return;
+
+    String report = 'Hearing Test Results for ${widget.profile.name}:\n\n';
+
+    for (int i = 0; i < results.length; i++) {
+      final testNumber = i + 1;
+      final result = results[i];
+      report += '--- Test $testNumber ---\n';
+      report += 'Left Ear:\n';
+      result.leftEarResults.forEach(
+        (freq, db) => report += '$freq Hz: $db dB\n',
+      );
+      report += '\nRight Ear:\n';
+      result.rightEarResults.forEach(
+        (freq, db) => report += '$freq Hz: $db dB\n',
+      );
+      report += '\n';
+    }
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('RAW DATA', style: TextStyle(letterSpacing: 2)),
+          content: SingleChildScrollView(
+            child: Text(
+              report,
+              style: const TextStyle(fontSize: 14, color: Colors.white70),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('CLOSE'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final results = widget.profile.testResults;
@@ -477,9 +521,19 @@ class _ResultsScreenState extends State<ResultsScreen>
           const SizedBox(height: 20),
           Padding(
             padding: const EdgeInsets.only(bottom: 32.0),
-            child: ElevatedButton(
-              onPressed: () => _shareResults(context),
-              child: const Text('SHARE RESULTS'),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                ElevatedButton(
+                  onPressed: () => _shareResults(context),
+                  child: const Text('SHARE RESULTS'),
+                ),
+                const SizedBox(width: 16),
+                ElevatedButton(
+                  onPressed: () => _showResultsPopup(context),
+                  child: const Text('VIEW RESULTS'),
+                ),
+              ],
             ),
           ),
         ],
