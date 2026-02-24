@@ -240,7 +240,11 @@ class _ScreenTestState extends State<ScreenTest> {
       leftEarResults: _leftEarResults,
       rightEarResults: _rightEarResults,
     );
-    widget.profile.testResult = result;
+
+    widget.profile.testResults.add(result);
+    if (widget.profile.testResults.length > 3) {
+      widget.profile.testResults.removeAt(0); // Keep only the latest 3
+    }
 
     await _profileStorage.saveProfile(widget.profile);
 
@@ -305,7 +309,7 @@ class _ScreenTestState extends State<ScreenTest> {
           onPressed: _startCountdown,
           child: const Text("START TEST"),
         ),
-        if (widget.profile.testResult != null)
+        if (widget.profile.testResults.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 32.0),
             child: TextButton(

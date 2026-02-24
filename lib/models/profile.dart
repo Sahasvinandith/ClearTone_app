@@ -2,26 +2,32 @@ import 'hearing_test_result.dart';
 
 class Profile {
   final String name;
-  HearingTestResult? testResult;
+  List<HearingTestResult> testResults;
 
-  Profile({required this.name, this.testResult});
+  Profile({required this.name, List<HearingTestResult>? testResults})
+    : testResults = testResults ?? [];
 
   // Factory constructor to create a Profile from a JSON string
   factory Profile.fromJson(Map<String, dynamic> jsonData) {
-    HearingTestResult? testResult;
-    if (jsonData.containsKey('testResult')) {
-      testResult = HearingTestResult.fromJson(jsonData['testResult']);
+    List<HearingTestResult> testResults = [];
+    if (jsonData.containsKey('testResults')) {
+      testResults = (jsonData['testResults'] as List)
+          .map((item) => HearingTestResult.fromJson(item))
+          .toList();
+    } else if (jsonData.containsKey('testResult')) {
+      // Backwards compatibility
+      testResults.add(HearingTestResult.fromJson(jsonData['testResult']));
     }
 
-    return Profile(name: jsonData['name'], testResult: testResult);
+    return Profile(name: jsonData['name'], testResults: testResults);
   }
 
   // Method to convert a Profile object to a JSON object
   Map<String, dynamic> toJson() {
     final Map<String, dynamic> data = {'name': name};
 
-    if (testResult != null) {
-      data['testResult'] = testResult!.toJson();
+    if (testResults.isNotEmpty) {
+      data['testResults'] = testResults.map((r) => r.toJson()).toList();
     }
 
     return data;
