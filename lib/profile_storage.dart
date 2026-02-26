@@ -17,8 +17,9 @@ class ProfileStorage {
 
   Future<void> saveProfiles(List<Profile> profiles) async {
     final prefs = await SharedPreferences.getInstance();
-    final String profilesString =
-        jsonEncode(profiles.map((p) => p.toJson()).toList());
+    final String profilesString = jsonEncode(
+      profiles.map((p) => p.toJson()).toList(),
+    );
     await prefs.setString(_profilesKey, profilesString);
   }
 
@@ -30,6 +31,12 @@ class ProfileStorage {
     } else {
       profiles.add(profile);
     }
+    await saveProfiles(profiles);
+  }
+
+  Future<void> deleteProfile(String name) async {
+    List<Profile> profiles = await loadProfiles();
+    profiles.removeWhere((p) => p.name == name);
     await saveProfiles(profiles);
   }
 }

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:cleartone/Pages/results_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../models/profile.dart';
 import '../models/hearing_test_result.dart';
 import '../audio_generator.dart';
@@ -24,6 +25,7 @@ class _ScreenTestState extends State<ScreenTest> {
   // Test state
   String _testStatus = "";
   Timer? _countdownTimer;
+  Timer? _responseTimer;
   int _countdown = 3;
   String? currentTestEar;
 
@@ -49,6 +51,7 @@ class _ScreenTestState extends State<ScreenTest> {
   @override
   void dispose() {
     _countdownTimer?.cancel();
+    _responseTimer?.cancel();
     _audioGenerator.stopFile();
     _audioGenerator.stopTone();
     super.dispose();
@@ -85,9 +88,9 @@ class _ScreenTestState extends State<ScreenTest> {
   }
 
   void _playNextTone() {
+    _responseTimer?.cancel();
     setState(() {
-      _testStatus =
-          "Playing at ${_frequencies[_currentFrequencyIndex]} Hz...\n Amplitude $_currentAmplitude dB";
+      _testStatus = "TESTING ${_currentEar.toUpperCase()} EAR";
     });
 
     String nonTestEar = _currentEar == "left" ? "right" : "left";
@@ -107,8 +110,15 @@ class _ScreenTestState extends State<ScreenTest> {
       frequency: _frequencies[_currentFrequencyIndex].toDouble(),
       amplitude: _currentAmplitude,
       channel: _currentEar,
-      duration: 3000, // 3-second tone
+      duration: 4000, // 4-second tone
     );
+
+    // Wait 4 seconds for user input. If none, register as 'no' (not heard).
+    _responseTimer = Timer(const Duration(milliseconds: 4000), () {
+      if (mounted) {
+        _userHeardTone(false);
+      }
+    });
   }
 
   void _userHeardTone(bool heard) {
@@ -192,6 +202,7 @@ class _ScreenTestState extends State<ScreenTest> {
   }
 
   Future<void> _finishTest() async {
+    _responseTimer?.cancel();
     final result = HearingTestResult(
       leftEarResults: _leftEarResults,
       rightEarResults: _rightEarResults,
@@ -255,33 +266,53 @@ class _ScreenTestState extends State<ScreenTest> {
           ),
           textAlign: TextAlign.center,
         ),
-        const SizedBox(height: 64),
+        const SizedBox(height: 16),
         const Text(
-          "DID YOU HEAR THE SOUND?",
+          "TAP THE BUTTON IF YOU HEAR A TONE",
           style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w600,
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
             letterSpacing: 1.5,
+            color: Colors.white70,
           ),
+          textAlign: TextAlign.center,
         ),
-        const SizedBox(height: 32),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            ElevatedButton(
-              onPressed: () => _userHeardTone(true),
-              child: const Text("YES"),
+        const SizedBox(height: 64),
+        GestureDetector(
+          onTap: () {
+            if (_responseTimer?.isActive ?? false) {
+              _responseTimer?.cancel();
+              HapticFeedback.lightImpact();
+              _userHeardTone(true);
+            }
+          },
+          child: Container(
+            width: 200,
+            height: 200,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: const Color(0xFF1C1C1C),
+              border: Border.all(color: const Color(0xFFD4AF37), width: 4),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFFD4AF37).withValues(alpha: 0.2),
+                  blurRadius: 20,
+                  spreadRadius: 5,
+                ),
+              ],
             ),
-            ElevatedButton(
-              onPressed: () => _userHeardTone(false),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF282828),
-                foregroundColor: Colors.white,
-                side: const BorderSide(color: Color(0xFF2A2A2A)),
+            child: const Center(
+              child: Text(
+                "YES",
+                style: TextStyle(
+                  fontSize: 32,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 4,
+                  color: Colors.white,
+                ),
               ),
-              child: const Text("NO"),
             ),
-          ],
+          ),
         ),
       ],
     );

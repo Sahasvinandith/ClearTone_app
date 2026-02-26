@@ -5,6 +5,7 @@ import 'results_screen.dart';
 import '../profile_storage.dart';
 import 'screen_test.dart';
 import '../audio_generator.dart';
+import 'profile_selection_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final Profile profile;
@@ -76,7 +77,13 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(height: 32),
           ElevatedButton(
             onPressed: () {
-              Navigator.of(context).pop();
+              Navigator.pushAndRemoveUntil(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const ProfileSelectionScreen(),
+                ),
+                (route) => false,
+              );
             },
             child: const Text('SWITCH PROFILES'),
           ),
@@ -187,9 +194,13 @@ class _HomeScreenState extends State<HomeScreen> {
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
       onSelected: (dynamic value) {
         if (value is String && value == 'ADD_NEW') {
-          // Assuming user navigates back to selection screen to deal with this,
-          // or we just pop out
-          Navigator.of(context).pop();
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(
+              builder: (context) => const ProfileSelectionScreen(),
+            ),
+            (route) => false,
+          );
         } else if (value is Profile) {
           setState(() {
             _activeProfile = value;
@@ -273,6 +284,20 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             child: const Text('CHECK MY EAR PROFILE'),
           ),
+        const SizedBox(height: 16),
+        TextButton(
+          onPressed: () {
+            Navigator.pushAndRemoveUntil(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const ProfileSelectionScreen(),
+              ),
+              (route) => false,
+            );
+          },
+          style: TextButton.styleFrom(foregroundColor: const Color(0xFF666666)),
+          child: const Text('SWITCH PROFILE'),
+        ),
       ],
     );
   }

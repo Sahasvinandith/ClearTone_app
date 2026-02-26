@@ -77,6 +77,40 @@ class _ProfileSelectionScreenState extends State<ProfileSelectionScreen> {
     );
   }
 
+  void _deleteProfile(Profile profile) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text(
+            'DELETE PROFILE',
+            style: TextStyle(letterSpacing: 1),
+          ),
+          content: Text(
+            'Are you sure you want to delete ${profile.name.toUpperCase()}?',
+            style: const TextStyle(color: Colors.white70),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('CANCEL'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              child: const Text('DELETE'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirm == true) {
+      await _profileStorage.deleteProfile(profile.name);
+      _loadProfiles();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -122,14 +156,24 @@ class _ProfileSelectionScreenState extends State<ProfileSelectionScreen> {
                           size: 20,
                         ),
                         const SizedBox(width: 12),
-                        Text(
-                          profile.name.toUpperCase(),
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 1.5,
-                            color: Colors.white,
+                        Expanded(
+                          child: Text(
+                            profile.name.toUpperCase(),
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 1.5,
+                              color: Colors.white,
+                            ),
+                            overflow: TextOverflow.ellipsis,
                           ),
+                        ),
+                        IconButton(
+                          icon: const Icon(
+                            Icons.delete_outline,
+                            color: Colors.white70,
+                          ),
+                          onPressed: () => _deleteProfile(profile),
                         ),
                       ],
                     ),
