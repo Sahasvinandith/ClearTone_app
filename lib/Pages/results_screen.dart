@@ -521,14 +521,15 @@ class _ResultsScreenState extends State<ResultsScreen>
           const SizedBox(height: 20),
           Padding(
             padding: const EdgeInsets.only(bottom: 32.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            child: Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 16,
+              runSpacing: 16,
               children: [
                 ElevatedButton(
                   onPressed: () => _shareResults(context),
                   child: const Text('SHARE RESULTS'),
                 ),
-                const SizedBox(width: 16),
                 ElevatedButton(
                   onPressed: () => _showResultsPopup(context),
                   child: const Text('VIEW RESULTS'),
