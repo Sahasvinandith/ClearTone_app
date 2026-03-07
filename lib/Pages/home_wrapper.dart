@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'home_screen.dart';
+import 'amplification_screen.dart';
 
 import '../models/profile.dart';
 
@@ -24,9 +25,7 @@ class _HomeWrapperState extends State<HomeWrapper> {
     const Center(
       child: Text('STATS', style: TextStyle(letterSpacing: 1, fontSize: 18)),
     ),
-    const Center(
-      child: Text('MORE', style: TextStyle(letterSpacing: 1, fontSize: 18)),
-    ),
+    AmplificationScreen(profile: widget.profile),
   ];
 
   @override
@@ -96,9 +95,9 @@ class _HomeWrapperState extends State<HomeWrapper> {
                     label: 'STATS',
                   ),
                   BottomNavigationBarItem(
-                    icon: _buildIcon(Icons.more_horiz_outlined, 3),
-                    activeIcon: _buildActiveIcon(Icons.more_horiz, 3),
-                    label: 'MORE',
+                    icon: _buildIcon(Icons.hearing_outlined, 3),
+                    activeIcon: _buildActiveIcon(Icons.hearing, 3),
+                    label: 'AMPLIFY',
                   ),
                 ],
               ),
