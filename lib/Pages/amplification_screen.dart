@@ -5,6 +5,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'dart:io';
 import '../models/profile.dart';
+import '../audio_engine_ffi.dart';
 
 class AmplificationScreen extends StatefulWidget {
   final Profile profile;
@@ -18,11 +19,13 @@ class AmplificationScreen extends StatefulWidget {
 class _AmplificationScreenState extends State<AmplificationScreen> {
   final AudioRecorder _audioRecorder = AudioRecorder();
   final AudioPlayer _audioPlayer = AudioPlayer();
+  final AudioEngineFFI _audioEngine = AudioEngineFFI();
   bool _isRecording = false;
   bool _hasPermission = false;
   List<FileSystemEntity> _recordings = [];
   String? _currentlyPlayingPath;
   bool _isPlaying = false;
+  bool _isProcessing = false;
 
   @override
   void initState() {
@@ -65,8 +68,9 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
       final files = directory.listSync().toList();
       final profileRecordings = files.where((file) {
         final filename = file.path.split('/').last;
+        print("file name is " + filename.toString());
         return filename.startsWith('amplification_${widget.profile.name}_') &&
-            filename.endsWith('.m4a');
+            filename.endsWith('.wav');
       }).toList();
 
       // Sort newest first
@@ -95,10 +99,14 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
     try {
       final directory = await getApplicationDocumentsDirectory();
       final path =
-          '${directory.path}/amplification_${widget.profile.name}_${DateTime.now().millisecondsSinceEpoch}.m4a';
+          '${directory.path}/amplification_${widget.profile.name}_${DateTime.now().millisecondsSinceEpoch}.wav';
 
       await _audioRecorder.start(
-        const RecordConfig(encoder: AudioEncoder.aacLc),
+        const RecordConfig(
+          encoder: AudioEncoder.wav,
+          sampleRate: 48000,
+          numChannels: 1,
+        ),
         path: path,
       );
 
@@ -169,6 +177,88 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
     return '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
 
+  Future<void> _processAudio(String inputPath) async {
+    if (_isProcessing) return;
+
+    setState(() {
+      _isProcessing = true;
+    });
+
+    try {
+      if (widget.profile.testResults.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Profile needs at least one test result to process audio!',
+              ),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+
+      // Generate output path by appending '_processed' before '.wav'
+      final outPath = inputPath.replaceAll('.wav', '_processed.wav');
+
+      // Get latest test result
+      final latestResult = widget.profile.testResults.last;
+
+      // Calculate avg loss between left and right ear for each band
+      // Since the engine uses 6 bands and the test has 6 fixed frequencies
+      // Assuming test frequencies: 250, 500, 1000, 2000, 4000, 8000
+      List<int> sortedFreqs = latestResult.leftEarResults.keys.toList()..sort();
+      List<double> avgLoss = [];
+      for (int freq in sortedFreqs) {
+        double left = latestResult.leftEarResults[freq]?.toDouble() ?? 0.0;
+        double right = latestResult.rightEarResults[freq]?.toDouble() ?? 0.0;
+        avgLoss.add((left + right) / 2.0);
+      }
+
+      while (avgLoss.length < 6) {
+        avgLoss.add(0.0);
+      }
+      if (avgLoss.length > 6) avgLoss = avgLoss.sublist(0, 6);
+
+      final result = _audioEngine.processAudio(
+        inPath: inputPath,
+        outPath: outPath,
+        loss6: avgLoss,
+      );
+
+      if (result == 0) {
+        _loadRecordings(); // Reload to show the new processed file
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Audio processed successfully!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } else {
+        throw Exception('Audio engine returned error code: $result');
+      }
+    } catch (e) {
+      debugPrint('Error processing audio: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error processing audio: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -224,7 +314,7 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           color: _isRecording
-                              ? Colors.red.withOpacity(0.2)
+                              ? Colors.red.withValues(alpha: 0.2)
                               : const Color(0xFF282828),
                           border: Border.all(
                             color: _isRecording
@@ -296,94 +386,173 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
                     final stat = File(file.path).statSync();
                     final isCurrentlyPlaying =
                         _currentlyPlayingPath == file.path;
+                    final filename = file.path.split('/').last;
 
                     return Container(
-                      margin: const EdgeInsets.only(bottom: 12),
+                      margin: const EdgeInsets.only(bottom: 8),
                       decoration: BoxDecoration(
                         color: const Color(0xFF1C1C1C),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
                           color: isCurrentlyPlaying
                               ? const Color(0xFFD4AF37)
-                              : const Color(0xFF2A2A2A),
+                              : Colors.transparent,
+                          width: 1,
                         ),
                       ),
-                      child: ListTile(
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 8,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 12,
                         ),
-                        leading: CircleAvatar(
-                          backgroundColor: isCurrentlyPlaying
-                              ? const Color(0xFFD4AF37).withOpacity(0.2)
-                              : const Color(0xFF282828),
-                          child: Icon(
-                            isCurrentlyPlaying && _isPlaying
-                                ? Icons.pause
-                                : Icons.play_arrow,
-                            color: isCurrentlyPlaying
-                                ? const Color(0xFFD4AF37)
-                                : Colors.white,
-                          ),
-                        ),
-                        title: Text(
-                          'Recording ${index + 1}',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 14,
-                          ),
-                        ),
-                        subtitle: Padding(
-                          padding: const EdgeInsets.only(top: 4.0),
-                          child: Text(
-                            _formatDateTime(stat.modified),
-                            style: const TextStyle(
-                              color: Color(0xFF666666),
-                              fontSize: 12,
+                        child: Row(
+                          children: [
+                            CircleAvatar(
+                              backgroundColor: isCurrentlyPlaying
+                                  ? const Color(
+                                      0xFFD4AF37,
+                                    ).withValues(alpha: 0.2)
+                                  : const Color(0xFF282828),
+                              child: Icon(
+                                isCurrentlyPlaying && _isPlaying
+                                    ? Icons.pause
+                                    : Icons.play_arrow,
+                                color: isCurrentlyPlaying
+                                    ? const Color(0xFFD4AF37)
+                                    : Colors.white,
+                              ),
                             ),
-                          ),
-                        ),
-                        onTap: () => _togglePlayback(file.path),
-                        trailing: IconButton(
-                          icon: const Icon(
-                            Icons.delete_outline,
-                            color: Colors.redAccent,
-                          ),
-                          onPressed: () {
-                            showDialog(
-                              context: context,
-                              builder: (context) => AlertDialog(
-                                backgroundColor: const Color(0xFF1C1C1C),
-                                title: const Text('Delete Recording?'),
-                                content: const Text(
-                                  'Are you sure you want to delete this recording?',
-                                  style: TextStyle(color: Colors.white70),
-                                ),
-                                actions: [
-                                  TextButton(
-                                    child: const Text(
-                                      'CANCEL',
-                                      style: TextStyle(
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    filename,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Row(
+                                    children: [
+                                      const Icon(
+                                        Icons.calendar_today_outlined,
+                                        size: 12,
                                         color: Color(0xFF666666),
                                       ),
-                                    ),
-                                    onPressed: () => Navigator.pop(context),
-                                  ),
-                                  TextButton(
-                                    child: const Text(
-                                      'DELETE',
-                                      style: TextStyle(color: Colors.redAccent),
-                                    ),
-                                    onPressed: () {
-                                      Navigator.pop(context);
-                                      _deleteRecording(file.path);
-                                    },
+                                      const SizedBox(width: 4),
+                                      Expanded(
+                                        child: Text(
+                                          _formatDateTime(stat.modified),
+                                          style: const TextStyle(
+                                            color: Color(0xFF666666),
+                                            fontSize: 12,
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ],
                               ),
-                            );
-                          },
+                            ),
+                            const SizedBox(width: 8),
+                            Wrap(
+                              spacing:
+                                  -8, // Reduce horizontal spacing between buttons
+                              children: [
+                                if (!filename.contains('_processed') &&
+                                    filename.endsWith('.wav'))
+                                  IconButton(
+                                    icon: _isProcessing
+                                        ? const SizedBox(
+                                            width: 16,
+                                            height: 16,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: Color(0xFFD4AF37),
+                                            ),
+                                          )
+                                        : const Icon(
+                                            Icons.auto_fix_high,
+                                            color: Color(0xFFD4AF37),
+                                          ),
+                                    onPressed: _isProcessing
+                                        ? null
+                                        : () => _processAudio(file.path),
+                                    tooltip: 'Process Audio',
+                                    constraints: const BoxConstraints(),
+                                    padding: const EdgeInsets.all(8),
+                                  ),
+                                IconButton(
+                                  icon: Icon(
+                                    isCurrentlyPlaying && _isPlaying
+                                        ? Icons.pause_circle_filled
+                                        : Icons.play_circle_fill,
+                                    color: const Color(0xFFD4AF37),
+                                    size: 28,
+                                  ),
+                                  onPressed: () => _togglePlayback(file.path),
+                                  constraints: const BoxConstraints(),
+                                  padding: const EdgeInsets.all(8),
+                                ),
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.delete_outline,
+                                    color: Colors.redAccent,
+                                    size: 24,
+                                  ),
+                                  onPressed: () {
+                                    showDialog(
+                                      context: context,
+                                      builder: (context) => AlertDialog(
+                                        backgroundColor: const Color(
+                                          0xFF1C1C1C,
+                                        ),
+                                        title: const Text('Delete Recording?'),
+                                        content: const Text(
+                                          'Are you sure you want to delete this recording?',
+                                          style: TextStyle(
+                                            color: Colors.white70,
+                                          ),
+                                        ),
+                                        actions: [
+                                          TextButton(
+                                            child: const Text(
+                                              'CANCEL',
+                                              style: TextStyle(
+                                                color: Color(0xFF666666),
+                                              ),
+                                            ),
+                                            onPressed: () =>
+                                                Navigator.pop(context),
+                                          ),
+                                          TextButton(
+                                            child: const Text(
+                                              'DELETE',
+                                              style: TextStyle(
+                                                color: Colors.redAccent,
+                                              ),
+                                            ),
+                                            onPressed: () {
+                                              Navigator.pop(context);
+                                              _deleteRecording(file.path);
+                                            },
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
                       ),
                     );
