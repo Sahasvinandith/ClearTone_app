@@ -29,7 +29,6 @@ typedef _ProcessAudioFileC =
       Float dry,
     );
 
-// Dart Function Signature
 typedef _ProcessAudioFileDart =
     int Function(
       Pointer<Utf8> inPath,
@@ -44,12 +43,40 @@ typedef _ProcessAudioFileDart =
       double dry,
     );
 
+typedef _StartRtStreamC = Int32 Function(Int32 inputDeviceId);
+typedef _StartRtStreamDart = int Function(int inputDeviceId);
+
+typedef _StopRtStreamC = Int32 Function();
+typedef _StopRtStreamDart = int Function();
+
+typedef _UpdateRtParamsC = Int32 Function(Pointer<Float> loss6);
+typedef _UpdateRtParamsDart = int Function(Pointer<Float> loss6);
+
+typedef _DebugStartCaptureC = Void Function();
+typedef _DebugStartCaptureDart = void Function();
+
+typedef _DebugStopCaptureC = Void Function();
+typedef _DebugStopCaptureDart = void Function();
+
+typedef _DebugSaveCaptureC = Int32 Function(Pointer<Utf8> filePath, Int32 source);
+typedef _DebugSaveCaptureDart = int Function(Pointer<Utf8> filePath, int source);
+
+typedef _DebugGetCaptureSizeC = Int32 Function();
+typedef _DebugGetCaptureSizeDart = int Function();
+
 class AudioEngineFFI {
   static final AudioEngineFFI _instance = AudioEngineFFI._internal();
   factory AudioEngineFFI() => _instance;
 
   late final DynamicLibrary _lib;
   late final _ProcessAudioFileDart _processAudioFile;
+  late final _StartRtStreamDart _startRtStream;
+  late final _StopRtStreamDart _stopRtStream;
+  late final _UpdateRtParamsDart _updateRtParams;
+  late final _DebugStartCaptureDart _debugStartCapture;
+  late final _DebugStopCaptureDart _debugStopCapture;
+  late final _DebugSaveCaptureDart _debugSaveCapture;
+  late final _DebugGetCaptureSizeDart _debugGetCaptureSize;
 
   AudioEngineFFI._internal() {
     if (Platform.isAndroid) {
@@ -64,6 +91,31 @@ class AudioEngineFFI {
         .lookupFunction<_ProcessAudioFileC, _ProcessAudioFileDart>(
           'process_audio_file_ffi',
         );
+
+    _startRtStream = _lib.lookupFunction<_StartRtStreamC, _StartRtStreamDart>(
+      'start_rt_stream_ffi',
+    );
+
+    _stopRtStream = _lib.lookupFunction<_StopRtStreamC, _StopRtStreamDart>(
+      'stop_rt_stream_ffi',
+    );
+
+    _updateRtParams = _lib
+        .lookupFunction<_UpdateRtParamsC, _UpdateRtParamsDart>(
+          'update_rt_params_ffi',
+        );
+
+    _debugStartCapture = _lib.lookupFunction<_DebugStartCaptureC,
+        _DebugStartCaptureDart>('debug_start_capture_ffi');
+
+    _debugStopCapture = _lib.lookupFunction<_DebugStopCaptureC,
+        _DebugStopCaptureDart>('debug_stop_capture_ffi');
+
+    _debugSaveCapture = _lib.lookupFunction<_DebugSaveCaptureC,
+        _DebugSaveCaptureDart>('debug_save_capture_ffi');
+
+    _debugGetCaptureSize = _lib.lookupFunction<_DebugGetCaptureSizeC,
+        _DebugGetCaptureSizeDart>('debug_get_capture_size_ffi');
   }
 
   /// Processes the audio file at [inPath] and saves it to [outPath].
@@ -121,5 +173,60 @@ class AudioEngineFFI {
       calloc.free(loss6Ptr);
       calloc.free(thrDbPtr);
     }
+  }
+
+  /// Starts the Oboe real-time audio stream.
+  int startRtStream(int inputDeviceId) {
+    return _startRtStream(inputDeviceId);
+  }
+
+  /// Stops the Oboe real-time audio stream.
+  int stopRtStream() {
+    return _stopRtStream();
+  }
+
+  /// Updates the hearing loss profile for the active real-time stream.
+  int updateRtParams(List<double> loss6) {
+    print("Update Rt Params: $loss6");
+    if (loss6.length != 6) {
+      throw ArgumentError('loss6 must contain exactly 6 elements');
+    }
+
+    final Pointer<Float> loss6Ptr = calloc<Float>(6);
+    for (int i = 0; i < 6; i++) {
+      loss6Ptr[i] = loss6[i];
+    }
+
+    try {
+      return _updateRtParams(loss6Ptr);
+    } finally {
+      calloc.free(loss6Ptr);
+    }
+  }
+
+  /// Starts capturing input audio samples for debugging.
+  void debugStartCapture() {
+    _debugStartCapture();
+  }
+
+  /// Stops capturing input audio samples.
+  void debugStopCapture() {
+    _debugStopCapture();
+  }
+
+  /// Saves a captured buffer to [filePath] as raw float32 PCM.
+  /// [source] 0 for input (mic), 1 for output (processed).
+  int debugSaveCapture(String filePath, int source) {
+    final Pointer<Utf8> pathPtr = filePath.toNativeUtf8();
+    try {
+      return _debugSaveCapture(pathPtr, source);
+    } finally {
+      calloc.free(pathPtr);
+    }
+  }
+
+  /// Returns the number of samples currently in the capture buffer.
+  int debugGetCaptureSize() {
+    return _debugGetCaptureSize();
   }
 }

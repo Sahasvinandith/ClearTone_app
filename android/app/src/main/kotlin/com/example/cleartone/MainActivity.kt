@@ -3,6 +3,8 @@ package com.example.cleartone
 import android.media.AudioFormat
 import android.media.AudioTrack
 import android.media.MediaPlayer
+import android.media.AudioManager
+import android.media.AudioDeviceInfo
 import android.os.Build
 import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
@@ -69,8 +71,77 @@ class MainActivity : FlutterActivity() {
                     stopTone()
                     result.success(null)
                 }
+                "getAudioInputDevices" -> {
+                    try {
+                        val devices = getAudioInputDevices()
+                        result.success(devices)
+                    } catch (e: Exception) {
+                        result.error("DEVICE_ERROR", e.message, null)
+                    }
+                }
+                "enableBluetoothSco" -> {
+                    val enable = call.argument<Boolean>("enable") ?: false
+                    enableBluetoothSco(enable)
+                    result.success(null)
+                }
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    private fun getAudioInputDevices(): List<Map<String, Any>> {
+        val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
+        val devices = audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS)
+        val deviceList = mutableListOf<Map<String, Any>>()
+        
+        for (device in devices) {
+            val typeStr = when (device.type) {
+                AudioDeviceInfo.TYPE_BUILTIN_MIC -> "Built-in Mic"
+                AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "Bluetooth"
+                AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> "Bluetooth"
+                AudioDeviceInfo.TYPE_WIRED_HEADSET -> "Wired Headset"
+                AudioDeviceInfo.TYPE_USB_HEADSET -> "USB Headset"
+                AudioDeviceInfo.TYPE_USB_DEVICE -> "USB Mic"
+                else -> "Other (${device.type})"
+            }
+            
+            val name = if (device.productName.isNullOrEmpty()) typeStr else "${device.productName} ($typeStr)"
+            
+            val map = mapOf(
+                "id" to device.id,
+                "name" to name.toString(),
+                "type" to device.type
+            )
+            deviceList.add(map)
+        }
+        
+        return deviceList
+    }
+
+    private fun enableBluetoothSco(enable: Boolean) {
+        val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
+        try {
+            if (enable) {
+                Log.d("MainActivity", "Starting Bluetooth SCO")
+                audioManager.startBluetoothSco()
+                audioManager.isBluetoothScoOn = true
+                try {
+                    audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+                } catch (e: SecurityException) {
+                    Log.e("MainActivity", "SecurityException setting mode IN_COMMUNICATION: ${e.message}")
+                }
+            } else {
+                Log.d("MainActivity", "Stopping Bluetooth SCO")
+                audioManager.stopBluetoothSco()
+                audioManager.isBluetoothScoOn = false
+                try {
+                    audioManager.mode = AudioManager.MODE_NORMAL
+                } catch (e: SecurityException) {
+                    Log.e("MainActivity", "SecurityException setting mode NORMAL: ${e.message}")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error managing Bluetooth SCO: ${e.message}")
         }
     }
 

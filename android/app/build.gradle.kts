@@ -32,6 +32,7 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags += "-std=c++17"
+                arguments += "-DANDROID_STL=c++_shared"
             }
         }
     }
@@ -49,6 +50,14 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+    
+    buildFeatures {
+        prefab = true
+    }
+}
+
+dependencies {
+    implementation("com.google.oboe:oboe:1.8.1")
 }
 
 flutter {
