@@ -5,6 +5,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'dart:io';
+import 'dart:async';
 import '../models/profile.dart';
 import '../audio_engine_ffi.dart';
 
@@ -40,6 +41,7 @@ class _AmplificationScreenState extends State<AmplificationScreen>
   int? _selectedDeviceId;
   bool _isRtStreaming = false;
   bool _isCommunicationMode = true; // Default to VoiceCommunication
+  Timer? _reconnectTimer;
 
   // Real-time sliders
   final List<int> _rtBands = [
@@ -76,6 +78,49 @@ class _AmplificationScreenState extends State<AmplificationScreen>
     });
 
     _initRtGainFromProfile();
+    _startReconnectTimer();
+  }
+
+  @override
+  void dispose() {
+    _reconnectTimer?.cancel();
+    if (_isRtStreaming) {
+      _audioEngine.stopRtStream();
+    }
+    _tabController.dispose();
+    _audioRecorder.dispose();
+    _audioPlayer.dispose();
+    super.dispose();
+  }
+
+  void _startReconnectTimer() {
+    _reconnectTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
+      if (_isRtStreaming) {
+        bool actuallyPlaying = _audioEngine.isPlaying();
+        if (!actuallyPlaying) {
+          debugPrint("Audio engine stopped unexpectedly. Attempting restart...");
+          
+          // Stop and Restart Oboe Stream
+          _audioEngine.stopRtStream();
+          
+          // Re-enable SCO if needed 
+          if (_isCommunicationMode) {
+             try {
+               await _audioChannel.invokeMethod('enableBluetoothSco', {'enable': true});
+               await Future.delayed(const Duration(milliseconds: 500));
+             } catch (e) {
+               debugPrint("Error re-enabling Bluetooth SCO: $e");
+             }
+          }
+          
+          int result = _audioEngine.startRtStream(_selectedDeviceId ?? 0);
+          if (result == 0) {
+            _audioEngine.updateRtParams(_rtLosses);
+            debugPrint("Auto-restart successful.");
+          }
+        }
+      }
+    });
   }
 
   void _initRtGainFromProfile() {
@@ -97,16 +142,6 @@ class _AmplificationScreenState extends State<AmplificationScreen>
     }
   }
 
-  @override
-  void dispose() {
-    if (_isRtStreaming) {
-      _audioEngine.stopRtStream();
-    }
-    _tabController.dispose();
-    _audioRecorder.dispose();
-    _audioPlayer.dispose();
-    super.dispose();
-  }
 
   // --- Real-time Methods ---
 

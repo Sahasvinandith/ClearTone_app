@@ -67,6 +67,9 @@ typedef _DebugGetCaptureSizeDart = int Function();
 typedef _SetAudioUsageC = Void Function(Int32 usage);
 typedef _SetAudioUsageDart = void Function(int usage);
 
+typedef _IsPlayingC = Uint8 Function();
+typedef _IsPlayingDart = int Function();
+
 class AudioEngineFFI {
   static final AudioEngineFFI _instance = AudioEngineFFI._internal();
   factory AudioEngineFFI() => _instance;
@@ -81,6 +84,7 @@ class AudioEngineFFI {
   late final _DebugSaveCaptureDart _debugSaveCapture;
   late final _DebugGetCaptureSizeDart _debugGetCaptureSize;
   late final _SetAudioUsageDart _setAudioUsage;
+  late final _IsPlayingDart _isPlaying;
 
   AudioEngineFFI._internal() {
     if (Platform.isAndroid) {
@@ -123,6 +127,10 @@ class AudioEngineFFI {
 
     _setAudioUsage = _lib.lookupFunction<_SetAudioUsageC, _SetAudioUsageDart>(
       'set_audio_usage_ffi',
+    );
+
+    _isPlaying = _lib.lookupFunction<_IsPlayingC, _IsPlayingDart>(
+      'is_playing_ffi',
     );
   }
 
@@ -242,5 +250,9 @@ class AudioEngineFFI {
   /// 2 for VoiceCommunication (default), 1 for Media.
   void setAudioUsage(int usage) {
     _setAudioUsage(usage);
+  }
+
+  bool isPlaying() {
+    return _isPlaying() != 0;
   }
 }
