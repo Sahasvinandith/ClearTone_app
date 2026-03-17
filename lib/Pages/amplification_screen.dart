@@ -39,6 +39,7 @@ class _AmplificationScreenState extends State<AmplificationScreen>
   List<Map<String, dynamic>> _audioDevices = [];
   int? _selectedDeviceId;
   bool _isRtStreaming = false;
+  bool _isCommunicationMode = true; // Default to VoiceCommunication
 
   // Real-time sliders
   final List<int> _rtBands = [
@@ -150,23 +151,32 @@ class _AmplificationScreenState extends State<AmplificationScreen>
         return;
       }
 
-      int result = _audioEngine.startRtStream(_selectedDeviceId!);
-      print("Result: $result");
-      if (result == 0) {
-        _audioEngine.updateRtParams(_rtLosses);
-
+      // 1. Enable Bluetooth SCO first if in communication mode
+      if (_isCommunicationMode) {
         try {
           await _audioChannel.invokeMethod('enableBluetoothSco', {
             'enable': true,
           });
+          // Small delay to allow SCO to stabilize
+          await Future.delayed(const Duration(milliseconds: 500));
         } catch (e) {
           debugPrint("Error enabling Bluetooth SCO: $e");
         }
+      }
 
+      // 2. Configure usage
+      _audioEngine.setAudioUsage(_isCommunicationMode ? 2 : 1);
+
+      // 3. Start Oboe Stream
+      int result = _audioEngine.startRtStream(_selectedDeviceId!);
+      print("Result: $result");
+      if (result == 0) {
+        _audioEngine.updateRtParams(_rtLosses);
         setState(() {
           _isRtStreaming = true;
         });
       } else {
+        // ... (rest of error handling)
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -798,39 +808,27 @@ class _AmplificationScreenState extends State<AmplificationScreen>
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         decoration: BoxDecoration(
                           color: const Color(0xFF282828),
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(12),
                           border: Border.all(color: const Color(0xFF333333)),
                         ),
                         child: DropdownButtonHideUnderline(
                           child: DropdownButton<int>(
                             value: _selectedDeviceId,
-                            isExpanded: true,
                             dropdownColor: const Color(0xFF282828),
-                            icon: const Icon(
-                              Icons.arrow_drop_down,
-                              color: Color(0xFFD4AF37),
-                            ),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                            ),
-                            onChanged: _isRtStreaming
-                                ? null
-                                : (int? newValue) {
-                                    if (newValue != null) {
-                                      setState(() {
-                                        _selectedDeviceId = newValue;
-                                      });
-                                    }
-                                  },
-                            items: _audioDevices.map<DropdownMenuItem<int>>((
-                              Map<String, dynamic> device,
-                            ) {
+                            isExpanded: true,
+                            icon: const Icon(Icons.keyboard_arrow_down, color: Color(0xFFD4AF37)),
+                            style: const TextStyle(color: Colors.white, fontSize: 14),
+                            items: _audioDevices.map((device) {
                               return DropdownMenuItem<int>(
                                 value: device['id'] as int,
                                 child: Text(device['name'] as String),
                               );
                             }).toList(),
+                            onChanged: _isRtStreaming ? null : (value) {
+                              setState(() {
+                                _selectedDeviceId = value;
+                              });
+                            },
                           ),
                         ),
                       ),
@@ -845,6 +843,56 @@ class _AmplificationScreenState extends State<AmplificationScreen>
                             ),
                           ),
                         ),
+                      const SizedBox(height: 24),
+                      
+                      // Audio Mode Toggle
+                      const Text(
+                        'AUDIO MODE',
+                        style: TextStyle(
+                          color: Color(0xFF666666),
+                          fontSize: 12,
+                          letterSpacing: 1.2,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF282828),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFF333333)),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _isCommunicationMode ? 'Communication Mode' : 'Media Mode',
+                                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                                ),
+                                Text(
+                                  _isCommunicationMode 
+                                    ? 'Used for Bluetooth Headsets (SCO)' 
+                                    : 'Better for Wired / Phone Speaker',
+                                  style: const TextStyle(color: Colors.white54, fontSize: 11),
+                                ),
+                              ],
+                            ),
+                            Switch(
+                              value: _isCommunicationMode,
+                              activeColor: const Color(0xFFD4AF37),
+                              onChanged: _isRtStreaming ? null : (value) {
+                                setState(() {
+                                  _isCommunicationMode = value;
+                                });
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
 

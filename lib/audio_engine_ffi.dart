@@ -64,6 +64,9 @@ typedef _DebugSaveCaptureDart = int Function(Pointer<Utf8> filePath, int source)
 typedef _DebugGetCaptureSizeC = Int32 Function();
 typedef _DebugGetCaptureSizeDart = int Function();
 
+typedef _SetAudioUsageC = Void Function(Int32 usage);
+typedef _SetAudioUsageDart = void Function(int usage);
+
 class AudioEngineFFI {
   static final AudioEngineFFI _instance = AudioEngineFFI._internal();
   factory AudioEngineFFI() => _instance;
@@ -77,6 +80,7 @@ class AudioEngineFFI {
   late final _DebugStopCaptureDart _debugStopCapture;
   late final _DebugSaveCaptureDart _debugSaveCapture;
   late final _DebugGetCaptureSizeDart _debugGetCaptureSize;
+  late final _SetAudioUsageDart _setAudioUsage;
 
   AudioEngineFFI._internal() {
     if (Platform.isAndroid) {
@@ -116,6 +120,10 @@ class AudioEngineFFI {
 
     _debugGetCaptureSize = _lib.lookupFunction<_DebugGetCaptureSizeC,
         _DebugGetCaptureSizeDart>('debug_get_capture_size_ffi');
+
+    _setAudioUsage = _lib.lookupFunction<_SetAudioUsageC, _SetAudioUsageDart>(
+      'set_audio_usage_ffi',
+    );
   }
 
   /// Processes the audio file at [inPath] and saves it to [outPath].
@@ -228,5 +236,11 @@ class AudioEngineFFI {
   /// Returns the number of samples currently in the capture buffer.
   int debugGetCaptureSize() {
     return _debugGetCaptureSize();
+  }
+
+  /// Configures the Oboe stream usage.
+  /// 2 for VoiceCommunication (default), 1 for Media.
+  void setAudioUsage(int usage) {
+    _setAudioUsage(usage);
   }
 }
