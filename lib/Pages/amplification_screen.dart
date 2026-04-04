@@ -103,14 +103,20 @@ class _AmplificationScreenState extends State<AmplificationScreen>
           // Stop and Restart Oboe Stream
           _audioEngine.stopRtStream();
           
-          // Re-enable SCO if needed 
-          if (_isCommunicationMode) {
-             try {
-               await _audioChannel.invokeMethod('enableBluetoothSco', {'enable': true});
-               await Future.delayed(const Duration(milliseconds: 500));
-             } catch (e) {
-               debugPrint("Error re-enabling Bluetooth SCO: $e");
-             }
+          // Re-enable SCO only if a BT SCO device is selected
+          final reconnectDevice = _audioDevices.firstWhere(
+            (d) => d['id'] == _selectedDeviceId,
+            orElse: () => {},
+          );
+          final bool reconnectDeviceIsBtSco =
+              (reconnectDevice['type'] as int? ?? -1) == 7;
+          if (_isCommunicationMode && reconnectDeviceIsBtSco) {
+            try {
+              await _audioChannel.invokeMethod('enableBluetoothSco', {'enable': true});
+              await Future.delayed(const Duration(milliseconds: 500));
+            } catch (e) {
+              debugPrint("Error re-enabling Bluetooth SCO: $e");
+            }
           }
           
           int result = _audioEngine.startRtStream(_selectedDeviceId ?? 0);
@@ -168,12 +174,21 @@ class _AmplificationScreenState extends State<AmplificationScreen>
   void _toggleRtStream() async {
     if (_isRtStreaming) {
       _audioEngine.stopRtStream();
-      try {
-        await _audioChannel.invokeMethod('enableBluetoothSco', {
-          'enable': false,
-        });
-      } catch (e) {
-        debugPrint("Error disabling Bluetooth SCO: $e");
+      // Only stop SCO if it was started (i.e. a BT SCO device is/was selected)
+      final stoppingDevice = _audioDevices.firstWhere(
+        (d) => d['id'] == _selectedDeviceId,
+        orElse: () => {},
+      );
+      final bool stoppingDeviceIsBtSco =
+          (stoppingDevice['type'] as int? ?? -1) == 7;
+      if (_isCommunicationMode && stoppingDeviceIsBtSco) {
+        try {
+          await _audioChannel.invokeMethod('enableBluetoothSco', {
+            'enable': false,
+          });
+        } catch (e) {
+          debugPrint("Error disabling Bluetooth SCO: $e");
+        }
       }
       setState(() {
         _isRtStreaming = false;
@@ -186,8 +201,19 @@ class _AmplificationScreenState extends State<AmplificationScreen>
         return;
       }
 
-      // 1. Enable Bluetooth SCO first if in communication mode
-      if (_isCommunicationMode) {
+      // 1. Enable Bluetooth SCO only when the selected device is a BT SCO
+      //    device (TYPE_BLUETOOTH_SCO = 7). When the user picks the built-in
+      //    mic, startBluetoothSco() must NOT be called — Android's SCO is a
+      //    paired bidirectional channel and forcibly routes the input to the
+      //    headset mic, overriding any deviceId passed to Oboe/AAudio.
+      final selectedDevice = _audioDevices.firstWhere(
+        (d) => d['id'] == _selectedDeviceId,
+        orElse: () => {},
+      );
+      final bool selectedDeviceIsBtSco =
+          (selectedDevice['type'] as int? ?? -1) == 7; // AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+
+      if (_isCommunicationMode && selectedDeviceIsBtSco) {
         try {
           await _audioChannel.invokeMethod('enableBluetoothSco', {
             'enable': true,

@@ -41,6 +41,7 @@ class _ScreenTestState extends State<ScreenTest> {
   final Map<int, int> _leftEarResults = {};
   final Map<int, int> _rightEarResults = {};
   String _currentEar = "left";
+  List<String> _debugLogs = [];
 
   @override
   void initState() {
@@ -89,6 +90,7 @@ class _ScreenTestState extends State<ScreenTest> {
 
   void _playNextTone() {
     _responseTimer?.cancel();
+    _debugLogs.add("playing ${_currentAmplitude.toInt()}db at ${_frequencies[_currentFrequencyIndex]}hz. (${_currentEar} ear)");
     setState(() {
       _testStatus = "TESTING ${_currentEar.toUpperCase()} EAR";
     });
@@ -126,12 +128,14 @@ class _ScreenTestState extends State<ScreenTest> {
       if (heard) {
         _lastHeardAmplitude = _currentAmplitude.toInt();
         _currentAmplitude -= 10;
+        _debugLogs.add("user clicked. switching to ${_currentAmplitude.toInt()} db. (minimum hearing value is set to $_lastHeardAmplitude)");
         _playNextTone();
       } else {
         // First 'No', start reversal process
         _reversalCountingStarted = true;
         _isAscending = true; // Start ascending
         _currentAmplitude += 5;
+        _debugLogs.add("user not clicked. switching to ${_currentAmplitude.toInt()} db.");
         _playNextTone();
       }
       return;
@@ -148,6 +152,7 @@ class _ScreenTestState extends State<ScreenTest> {
         // We were going down and they still heard it
         _currentAmplitude -= 10;
       }
+      _debugLogs.add("user clicked. switching to ${_currentAmplitude.toInt()} db. (minimum hearing value is set to $_lastHeardAmplitude)");
     } else {
       // Not heard
       if (!_isAscending) {
@@ -159,6 +164,7 @@ class _ScreenTestState extends State<ScreenTest> {
         // We were going up and they still can't hear it
         _currentAmplitude += 5;
       }
+      _debugLogs.add("user not clicked. switching to ${_currentAmplitude.toInt()} db.");
     }
 
     if (_reversals >= 3) {
@@ -226,7 +232,7 @@ class _ScreenTestState extends State<ScreenTest> {
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
-        builder: (context) => ResultsScreen(profile: widget.profile),
+        builder: (context) => ResultsScreen(profile: widget.profile, debugLogs: _debugLogs),
       ),
     );
   }

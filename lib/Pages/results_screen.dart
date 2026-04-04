@@ -6,8 +6,9 @@ import '../models/hearing_test_result.dart';
 
 class ResultsScreen extends StatefulWidget {
   final Profile profile;
+  final List<String>? debugLogs;
 
-  const ResultsScreen({required this.profile, super.key});
+  const ResultsScreen({required this.profile, this.debugLogs, super.key});
 
   @override
   State<ResultsScreen> createState() => _ResultsScreenState();
@@ -399,6 +400,51 @@ class _ResultsScreenState extends State<ResultsScreen>
     );
   }
 
+  // Function to show debug logs in a popup
+  void _showDebugLogsPopup(BuildContext context) {
+    if (widget.debugLogs == null || widget.debugLogs!.isEmpty) {
+      showDialog(
+        context: context,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            title: const Text('DEBUG LOGS', style: TextStyle(letterSpacing: 2)),
+            content: const Text('No debug logs available.', style: TextStyle(fontSize: 14, color: Colors.white70)),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('CLOSE'),
+              ),
+            ],
+          );
+        },
+      );
+      return;
+    }
+
+    String logData = widget.debugLogs!.join('\n');
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('DEBUG LOGS', style: TextStyle(letterSpacing: 2)),
+          content: SingleChildScrollView(
+            child: Text(
+              logData,
+              style: const TextStyle(fontSize: 14, color: Colors.white70),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('CLOSE'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final results = widget.profile.testResults;
@@ -533,6 +579,10 @@ class _ResultsScreenState extends State<ResultsScreen>
                 ElevatedButton(
                   onPressed: () => _showResultsPopup(context),
                   child: const Text('VIEW RESULTS'),
+                ),
+                ElevatedButton(
+                  onPressed: () => _showDebugLogsPopup(context),
+                  child: const Text('VIEW LOGS'),
                 ),
               ],
             ),
