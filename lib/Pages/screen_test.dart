@@ -34,9 +34,11 @@ class _ScreenTestState extends State<ScreenTest> {
   int _currentFrequencyIndex = 0;
   double _currentAmplitude = 40.0;
   bool _isAscending = false;
-  int _reversals = 0;
-  int _lastHeardAmplitude = 0;
   bool _reversalCountingStarted = false;
+
+  // Consecutive ascending confirmation state
+  int _confirmingLevel = -1;  // The amplitude level being verified
+  int _confirmCount = 0;      // How many consecutive ascending confirmations at that level
 
   final Map<int, int> _leftEarResults = {};
   final Map<int, int> _rightEarResults = {};
@@ -125,58 +127,72 @@ class _ScreenTestState extends State<ScreenTest> {
 
   void _userHeardTone(bool heard) {
     if (!_reversalCountingStarted) {
+      // Initial descent phase: decrease by 10 until first miss
       if (heard) {
-        _lastHeardAmplitude = _currentAmplitude.toInt();
         _currentAmplitude -= 10;
-        _debugLogs.add("user clicked. switching to ${_currentAmplitude.toInt()} db. (minimum hearing value is set to $_lastHeardAmplitude)");
+        _debugLogs.add("user clicked. (initial descent) switching to ${_currentAmplitude.toInt()} db.");
         _playNextTone();
       } else {
-        // First 'No', start reversal process
+        // First miss — start the ascending verification process
         _reversalCountingStarted = true;
-        _isAscending = true; // Start ascending
+        _isAscending = true;
         _currentAmplitude += 5;
-        _debugLogs.add("user not clicked. switching to ${_currentAmplitude.toInt()} db.");
+        _debugLogs.add("user not clicked. (initial descent ended) switching to ${_currentAmplitude.toInt()} db.");
         _playNextTone();
       }
       return;
     }
 
     if (heard) {
-      _lastHeardAmplitude = _currentAmplitude.toInt();
+      final int heardAt = _currentAmplitude.toInt();
+
       if (_isAscending) {
-        // We were going up and they heard it
-        _reversals++;
-        _isAscending = false; // Reverse direction to descending
+        // --- Ascending confirmation ---
+        if (heardAt == _confirmingLevel) {
+          _confirmCount++;
+        } else {
+          // Different level heard — restart confirmation for new level
+          _confirmingLevel = heardAt;
+          _confirmCount = 1;
+        }
+
+        _debugLogs.add("user clicked. ascending confirmation #$_confirmCount at ${heardAt} db.");
+
+        if (_confirmCount >= 3) {
+          // Threshold confirmed!
+          _debugLogs.add(">>> THRESHOLD CONFIRMED at ${_confirmingLevel} db for ${_frequencies[_currentFrequencyIndex]} hz. <<<");
+          _recordResultAndMoveOn();
+          return;
+        }
+
+        // Not yet confirmed — switch to descending
+        _isAscending = false;
         _currentAmplitude -= 10;
+        _debugLogs.add("switching to ${_currentAmplitude.toInt()} db. (descending)");
       } else {
-        // We were going down and they still heard it
+        // Descending and still heard — keep descending
         _currentAmplitude -= 10;
+        _debugLogs.add("user clicked. (descending) switching to ${_currentAmplitude.toInt()} db.");
       }
-      _debugLogs.add("user clicked. switching to ${_currentAmplitude.toInt()} db. (minimum hearing value is set to $_lastHeardAmplitude)");
     } else {
       // Not heard
       if (!_isAscending) {
-        // We were going down and they missed it
-        _reversals++;
-        _isAscending = true; // Reverse direction to ascending
+        // Descending and missed — switch to ascending
+        _isAscending = true;
         _currentAmplitude += 5;
+        _debugLogs.add("user not clicked. (descending ended) switching to ${_currentAmplitude.toInt()} db. (ascending)");
       } else {
-        // We were going up and they still can't hear it
+        // Ascending and still can't hear — keep ascending
         _currentAmplitude += 5;
+        _debugLogs.add("user not clicked. (ascending) switching to ${_currentAmplitude.toInt()} db.");
       }
-      _debugLogs.add("user not clicked. switching to ${_currentAmplitude.toInt()} db.");
     }
 
-    if (_reversals >= 3) {
-      // Using 3 reversals
-      _recordResultAndMoveOn();
-    } else {
-      _playNextTone();
-    }
+    _playNextTone();
   }
 
   void _recordResultAndMoveOn() {
-    final threshold = _lastHeardAmplitude;
+    final threshold = _confirmingLevel;
     if (_currentEar == "left") {
       _leftEarResults[_frequencies[_currentFrequencyIndex]] = threshold;
     } else {
@@ -202,9 +218,9 @@ class _ScreenTestState extends State<ScreenTest> {
   void _resetFrequencyVariables() {
     _currentAmplitude = 40.0;
     _isAscending = false;
-    _reversals = 0;
-    _lastHeardAmplitude = 0;
     _reversalCountingStarted = false;
+    _confirmingLevel = -1;
+    _confirmCount = 0;
   }
 
   Future<void> _finishTest() async {
