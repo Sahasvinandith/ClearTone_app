@@ -53,3 +53,7 @@ cmake_install.cmake
 install_manifest.txt
 compile_commands.json
 Makefile
+
+linux/flutter/generated_plugin_registrant.cc
+linux/flutter/generated_plugin_registrant.h
+linux/flutter/generated_plugins.cmake
