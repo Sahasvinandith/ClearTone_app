@@ -39,7 +39,7 @@ android {
 
     externalNativeBuild {
         cmake {
-            path = file("../../Audio_Engine_Clear_tone/Multiband-hearing-loss-amplification-poc/CMakeLists.txt")
+            path = file("src/main/cpp/CMakeLists.txt")
         }
     }
 
