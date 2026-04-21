@@ -37,6 +37,8 @@ class _AmplificationScreenState extends State<AmplificationScreen>
   static const MethodChannel _audioChannel = MethodChannel(
     'com.cleartone/audio',
   );
+  // Bug 9: Named constant instead of magic number (AudioDeviceInfo.TYPE_BLUETOOTH_SCO = 7)
+  static const int _kAudioDeviceTypeBtSco = 7;
   List<Map<String, dynamic>> _audioDevices = [];
   int? _selectedDeviceId;
   bool _isRtStreaming = false;
@@ -77,6 +79,21 @@ class _AmplificationScreenState extends State<AmplificationScreen>
       }
     });
 
+    // Bug 5: Handle audio focus loss reported by native side
+    _audioChannel.setMethodCallHandler((call) async {
+      if (call.method == 'onAudioFocusLoss') {
+        debugPrint('Audio focus lost — stopping real-time stream.');
+        if (_isRtStreaming) {
+          _audioEngine.stopRtStream();
+          if (mounted) {
+            setState(() {
+              _isRtStreaming = false;
+            });
+          }
+        }
+      }
+    });
+
     _initRtGainFromProfile();
     _startReconnectTimer();
   }
@@ -99,26 +116,33 @@ class _AmplificationScreenState extends State<AmplificationScreen>
         bool actuallyPlaying = _audioEngine.isPlaying();
         if (!actuallyPlaying) {
           debugPrint("Audio engine stopped unexpectedly. Attempting restart...");
-          
+
           // Stop and Restart Oboe Stream
           _audioEngine.stopRtStream();
-          
+
           // Re-enable SCO only if a BT SCO device is selected
           final reconnectDevice = _audioDevices.firstWhere(
             (d) => d['id'] == _selectedDeviceId,
             orElse: () => {},
           );
           final bool reconnectDeviceIsBtSco =
-              (reconnectDevice['type'] as int? ?? -1) == 7;
+              (reconnectDevice['type'] as int? ?? -1) == _kAudioDeviceTypeBtSco;
           if (_isCommunicationMode && reconnectDeviceIsBtSco) {
             try {
-              await _audioChannel.invokeMethod('enableBluetoothSco', {'enable': true});
-              await Future.delayed(const Duration(milliseconds: 500));
+              // Bug 3: await the MethodChannel call which now resolves only after
+              // SCO_AUDIO_STATE_CONNECTED fires (with 3-second timeout).
+              await _audioChannel.invokeMethod('enableBluetoothSco', {'enable': true})
+                  .timeout(const Duration(seconds: 3));
             } catch (e) {
               debugPrint("Error re-enabling Bluetooth SCO: $e");
+              // SCO failed — abort reconnect attempt this cycle
+              return;
             }
           }
-          
+
+          // Bug 2: Apply audio usage before restarting the Oboe stream
+          _audioEngine.setAudioUsage(_isCommunicationMode ? 2 : 1);
+
           int result = _audioEngine.startRtStream(_selectedDeviceId ?? 0);
           if (result == 0) {
             _audioEngine.updateRtParams(_rtLosses);
@@ -172,6 +196,16 @@ class _AmplificationScreenState extends State<AmplificationScreen>
   }
 
   void _toggleRtStream() async {
+    // Bug 6: Cannot open Oboe stream while AudioRecord (record mode) owns the mic
+    if (!_isRtStreaming && _isRecording) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Stop recording before starting the real-time stream.'),
+        ),
+      );
+      return;
+    }
+
     if (_isRtStreaming) {
       _audioEngine.stopRtStream();
       // Only stop SCO if it was started (i.e. a BT SCO device is/was selected)
@@ -180,7 +214,7 @@ class _AmplificationScreenState extends State<AmplificationScreen>
         orElse: () => {},
       );
       final bool stoppingDeviceIsBtSco =
-          (stoppingDevice['type'] as int? ?? -1) == 7;
+          (stoppingDevice['type'] as int? ?? -1) == _kAudioDeviceTypeBtSco;
       if (_isCommunicationMode && stoppingDeviceIsBtSco) {
         try {
           await _audioChannel.invokeMethod('enableBluetoothSco', {
@@ -211,17 +245,22 @@ class _AmplificationScreenState extends State<AmplificationScreen>
         orElse: () => {},
       );
       final bool selectedDeviceIsBtSco =
-          (selectedDevice['type'] as int? ?? -1) == 7; // AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+          (selectedDevice['type'] as int? ?? -1) == _kAudioDeviceTypeBtSco;
 
       if (_isCommunicationMode && selectedDeviceIsBtSco) {
         try {
+          // Bug 1: await the MethodChannel call which now resolves only after
+          // SCO_AUDIO_STATE_CONNECTED fires on the native side (with 3-second timeout).
           await _audioChannel.invokeMethod('enableBluetoothSco', {
             'enable': true,
-          });
-          // Small delay to allow SCO to stabilize
-          await Future.delayed(const Duration(milliseconds: 500));
+          }).timeout(const Duration(seconds: 3));
         } catch (e) {
           debugPrint("Error enabling Bluetooth SCO: $e");
+          // SCO failed — abort stream start so we don't stream to a dead route
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Bluetooth SCO failed to connect: $e')),
+          );
+          return;
         }
       }
 
@@ -332,10 +371,16 @@ class _AmplificationScreenState extends State<AmplificationScreen>
   // --- Record Methods ---
 
   Future<void> _checkPermissions() async {
-    final status = await Permission.microphone.request();
+    // Bug 8: BLUETOOTH_CONNECT is a runtime permission on Android 12+ (API 31+).
+    // Requesting it here alongside microphone ensures we have it before calling
+    // enableBluetoothSco, which checks it natively and returns an error if missing.
+    final statuses = await [
+      Permission.microphone,
+      Permission.bluetoothConnect,
+    ].request();
     if (mounted) {
       setState(() {
-        _hasPermission = status.isGranted;
+        _hasPermission = statuses[Permission.microphone]?.isGranted ?? false;
       });
     }
   }
@@ -370,6 +415,16 @@ class _AmplificationScreenState extends State<AmplificationScreen>
     if (!_hasPermission) {
       await _checkPermissions();
       if (!_hasPermission) return;
+    }
+
+    // Bug 6: Cannot open AudioRecord while Oboe stream owns the mic
+    if (_isRtStreaming) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Stop the real-time stream before recording.'),
+        ),
+      );
+      return;
     }
 
     try {
