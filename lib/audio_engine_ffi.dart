@@ -70,6 +70,9 @@ typedef _SetAudioUsageDart = void Function(int usage);
 typedef _IsPlayingC = Uint8 Function();
 typedef _IsPlayingDart = int Function();
 
+typedef _GetEngineStateC = Int32 Function();
+typedef _GetEngineStateDart = int Function();
+
 class AudioEngineFFI {
   static final AudioEngineFFI _instance = AudioEngineFFI._internal();
   factory AudioEngineFFI() => _instance;
@@ -85,6 +88,7 @@ class AudioEngineFFI {
   late final _DebugGetCaptureSizeDart _debugGetCaptureSize;
   late final _SetAudioUsageDart _setAudioUsage;
   late final _IsPlayingDart _isPlaying;
+  late final _GetEngineStateDart _getEngineState;
 
   AudioEngineFFI._internal() {
     if (Platform.isAndroid) {
@@ -131,6 +135,10 @@ class AudioEngineFFI {
 
     _isPlaying = _lib.lookupFunction<_IsPlayingC, _IsPlayingDart>(
       'is_playing_ffi',
+    );
+
+    _getEngineState = _lib.lookupFunction<_GetEngineStateC, _GetEngineStateDart>(
+      'get_engine_state_ffi',
     );
   }
 
@@ -254,5 +262,10 @@ class AudioEngineFFI {
 
   bool isPlaying() {
     return _isPlaying() != 0;
+  }
+
+  /// Returns the engine state: 0=STOPPED, 1=RUNNING, 2=ERROR_NEEDS_RESTART.
+  int getEngineState() {
+    return _getEngineState();
   }
 }

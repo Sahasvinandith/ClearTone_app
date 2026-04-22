@@ -114,8 +114,9 @@ class _AmplificationScreenState extends State<AmplificationScreen>
     _reconnectTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
       if (_isRtStreaming) {
         bool actuallyPlaying = _audioEngine.isPlaying();
-        if (!actuallyPlaying) {
-          debugPrint("Audio engine stopped unexpectedly. Attempting restart...");
+        int engineState = _audioEngine.getEngineState();
+        if (!actuallyPlaying || engineState == 2) {
+          debugPrint("Audio engine needs restart (playing=$actuallyPlaying, state=$engineState).");
 
           // Stop and Restart Oboe Stream
           _audioEngine.stopRtStream();
