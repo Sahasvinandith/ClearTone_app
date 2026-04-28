@@ -33,6 +33,7 @@ android {
             cmake {
                 cppFlags += "-std=c++17"
                 arguments += "-DANDROID_STL=c++_shared"
+                arguments += "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
             }
         }
     }
@@ -57,7 +58,7 @@ android {
 }
 
 dependencies {
-    implementation("com.google.oboe:oboe:1.8.1")
+    implementation("com.google.oboe:oboe:1.9.0")
 }
 
 flutter {
