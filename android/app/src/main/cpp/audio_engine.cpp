@@ -10,6 +10,7 @@
 #include <oboe/Oboe.h>
 #include <android/log.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -576,10 +577,6 @@ public:
         int32_t outBurst = mOutputStream->getFramesPerBurst();
         LOGI("Output stream opened: sr=%d burst=%d", sampleRate, outBurst);
 
-        // ---- Allocate ring buffer: next power of 2 >= 4 * burst frames ----
-        int ringSize = static_cast<int>(outBurst) * 4;
-        mRingBuffer.allocate(ringSize);
-
         // ---- Open input stream at same sample rate ----
         oboe::AudioStreamBuilder inBuilder;
         inBuilder.setDirection(oboe::Direction::Input)
@@ -595,11 +592,10 @@ public:
             inBuilder.setDeviceId(inputDeviceId);
         }
 
-        if (mUsage == 2) {
-            inBuilder.setInputPreset(oboe::InputPreset::VoiceCommunication);
-        } else {
-            inBuilder.setInputPreset(oboe::InputPreset::Unprocessed);
-        }
+        // Always use Unprocessed to prevent Android's AEC from canceling our
+        // amplified output (AEC treats speaker playback as "echo" and removes it
+        // from the mic signal, producing noise instead of amplified sound).
+        inBuilder.setInputPreset(oboe::InputPreset::Unprocessed);
 
         result = inBuilder.openStream(mInputStream);
         if (result != oboe::Result::OK) {
@@ -640,8 +636,15 @@ public:
             }
         }
 
-        LOGI("Input stream opened: sr=%d burst=%d", mInputStream->getSampleRate(),
-             mInputStream->getFramesPerBurst());
+        int32_t inBurst = mInputStream->getFramesPerBurst();
+        LOGI("Input stream opened: sr=%d burst=%d", mInputStream->getSampleRate(), inBurst);
+
+        // ---- Allocate ring buffer: sized for the larger of the two burst sizes ----
+        // In communication mode, input burst (e.g. 960) >> output burst (e.g. 96),
+        // so we must base the ring buffer on the actual input burst to avoid overflow.
+        int ringSize = static_cast<int>(std::max(outBurst, inBurst)) * 8;
+        mRingBuffer.allocate(ringSize);
+        LOGI("Ring buffer allocated: size=%d (outBurst=%d inBurst=%d)", ringSize, outBurst, inBurst);
 
         // ---- Wire up callbacks ----
         mInputCallback.ringBuf = &mRingBuffer;
