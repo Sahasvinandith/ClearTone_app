@@ -5,7 +5,7 @@
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <application
-        android:label="cleartone"
+        android:label="ClearTone-Daham"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
