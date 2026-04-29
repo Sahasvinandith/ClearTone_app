@@ -45,6 +45,83 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  void _showTestModeSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1C1C1C),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(24, 20, 24, 40),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                'SELECT TEST MODE',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 2,
+                  color: Colors.white54,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 20),
+              _TestModeCard(
+                title: 'STANDARD TEST',
+                subtitle: 'Requires 3 consecutive detections\nto confirm each threshold',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ScreenTest(
+                        profile: _activeProfile,
+                        requiredHits: 3,
+                      ),
+                    ),
+                  ).then((_) => _loadProfiles());
+                },
+              ),
+              const SizedBox(height: 12),
+              _TestModeCard(
+                title: 'ADVANCED TEST',
+                subtitle: 'Requires 2 consecutive detections\nto confirm each threshold — faster',
+                isAdvanced: true,
+                onTap: () {
+                  Navigator.pop(ctx);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ScreenTest(
+                        profile: _activeProfile,
+                        requiredHits: 2,
+                      ),
+                    ),
+                  ).then((_) => _loadProfiles());
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   // Removed _addProfile and _showAddProfileDialog and _navigateToTest
 
   @override
@@ -257,14 +334,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         const SizedBox(height: 16),
         ElevatedButton(
-          onPressed: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => ScreenTest(profile: _activeProfile),
-              ),
-            ).then((_) => _loadProfiles());
-          },
+          onPressed: () => _showTestModeSheet(),
           child: const Text('START TEST'),
         ),
         const SizedBox(height: 16),
@@ -443,6 +513,68 @@ class _HomeScreenState extends State<HomeScreen> {
             onPressed: () => Navigator.of(context).pop(),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _TestModeCard extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  final bool isAdvanced;
+
+  const _TestModeCard({
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.isAdvanced = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final Color accent = isAdvanced ? const Color(0xFFD4AF37) : Colors.white70;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+        decoration: BoxDecoration(
+          border: Border.all(color: accent.withValues(alpha: 0.4), width: 1.5),
+          borderRadius: BorderRadius.circular(12),
+          color: isAdvanced
+              ? const Color(0xFFD4AF37).withValues(alpha: 0.07)
+              : Colors.white.withValues(alpha: 0.04),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1.2,
+                      color: accent,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.white54,
+                      height: 1.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right, color: accent.withValues(alpha: 0.6)),
+          ],
+        ),
       ),
     );
   }

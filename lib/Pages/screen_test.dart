@@ -10,8 +10,9 @@ import '../profile_storage.dart';
 
 class ScreenTest extends StatefulWidget {
   final Profile profile;
+  final int requiredHits; // 3 = Standard, 2 = Advanced
 
-  const ScreenTest({required this.profile, super.key});
+  const ScreenTest({required this.profile, this.requiredHits = 3, super.key});
 
   @override
   State<ScreenTest> createState() => _ScreenTestState();
@@ -158,7 +159,7 @@ class _ScreenTestState extends State<ScreenTest> {
 
         _debugLogs.add("user clicked. ascending confirmation #$_confirmCount at ${heardAt} db.");
 
-        if (_confirmCount >= 3) {
+        if (_confirmCount >= widget.requiredHits) {
           // Threshold confirmed!
           _debugLogs.add(">>> THRESHOLD CONFIRMED at ${_confirmingLevel} db for ${_frequencies[_currentFrequencyIndex]} hz. <<<");
           _recordResultAndMoveOn();
