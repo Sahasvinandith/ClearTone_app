@@ -74,6 +74,10 @@ static inline float dbToLin(float db) {
     return powf(10.0f, db / 20.0f);
 }
 
+static inline float linToDb(float lin) {
+    return 20.0f * log10f(fmaxf(lin, 1e-10f));
+}
+
 static inline void flushDenormal(float& v) {
     if (fabsf(v) < DENORMAL_GUARD) v = 0.0f;
 }
@@ -214,8 +218,8 @@ static void computeButterworthHP(BiquadCoeffs& c, float K) {
 
 struct DspParams {
     float makeupLin[NUM_BANDS];
-    float thresholdLin[NUM_BANDS];
-    float ratio_factor[NUM_BANDS];
+    float thresholdDb[NUM_BANDS];
+    float ratio[NUM_BANDS];
     float attackCoeff[NUM_BANDS];
     float releaseCoeff[NUM_BANDS];
     float masterGain;
@@ -428,15 +432,16 @@ public:
                 }
                 flushDenormal(env[b]);
 
-                // Compressor gain
+                // Compressor gain (dB domain)
                 float gain;
-                if (env[b] > p.thresholdLin[b]) {
-                    float r = env[b] / p.thresholdLin[b];
-                    gain = 1.0f / (1.0f + p.ratio_factor[b] * (r - 1.0f));
+                float envDb = linToDb(env[b]);
+                if (envDb > p.thresholdDb[b]) {
+                    float over = envDb - p.thresholdDb[b];
+                    float gainDb = p.thresholdDb[b] + over / p.ratio[b] - envDb;
+                    gain = dbToLin(gainDb);
                 } else {
                     gain = 1.0f;
                 }
-                gain = fminf(gain, 1.0f);
                 s *= gain;
 
                 // Smoothed makeup gain
@@ -752,9 +757,8 @@ public:
             p.makeupLin[b] = dbToLin(makeupDb);
 
             // Compressor parameters
-            float thrDb = DEFAULT_THRESHOLD_DB[b];
-            p.thresholdLin[b] = dbToLin(thrDb);
-            p.ratio_factor[b] = 1.0f - 1.0f / DEFAULT_RATIO;
+            p.thresholdDb[b]  = DEFAULT_THRESHOLD_DB[b];
+            p.ratio[b]        = DEFAULT_RATIO;
             p.attackCoeff[b]  = expf(-1.0f / (DEFAULT_ATTACK_MS * 0.001f * fs));
             p.releaseCoeff[b] = expf(-1.0f / (DEFAULT_RELEASE_MS * 0.001f * fs));
         }
@@ -838,9 +842,9 @@ private:
             DspParams& p = mParamBuf[buf];
             float fs = (mSampleRate > 0) ? static_cast<float>(mSampleRate) : 48000.0f;
             for (int b = 0; b < NUM_BANDS; ++b) {
-                p.makeupLin[b] = 1.0f;
-                p.thresholdLin[b] = dbToLin(DEFAULT_THRESHOLD_DB[b]);
-                p.ratio_factor[b] = 1.0f - 1.0f / DEFAULT_RATIO;
+                p.makeupLin[b]   = 1.0f;
+                p.thresholdDb[b] = DEFAULT_THRESHOLD_DB[b];
+                p.ratio[b]       = DEFAULT_RATIO;
                 p.attackCoeff[b]  = expf(-1.0f / (DEFAULT_ATTACK_MS * 0.001f * fs));
                 p.releaseCoeff[b] = expf(-1.0f / (DEFAULT_RELEASE_MS * 0.001f * fs));
             }
@@ -939,16 +943,14 @@ static int processAudioFileImpl(
 
     // Precompute per-band params
     float makeupLin[NUM_BANDS];
-    float thresholdLin[NUM_BANDS];
-    float ratio_factor_arr[NUM_BANDS];
+    float thresholdDbArr[NUM_BANDS];
     float attackCoeff[NUM_BANDS];
     float releaseCoeff[NUM_BANDS];
 
     for (int b = 0; b < NUM_BANDS; ++b) {
         float makeupDb = fminf(fmaxf(0.5f * loss6[b], 0.0f), 25.0f);
         makeupLin[b] = dbToLin(makeupDb);
-        thresholdLin[b] = dbToLin(thrDb[b]);
-        ratio_factor_arr[b] = 1.0f - 1.0f / ratio;
+        thresholdDbArr[b] = thrDb[b];
         attackCoeff[b]  = expf(-1.0f / (attackMs * 0.001f * fs));
         releaseCoeff[b] = expf(-1.0f / (releaseMs * 0.001f * fs));
     }
@@ -1010,14 +1012,16 @@ static int processAudioFileImpl(
             }
             flushDenormal(envArr[b]);
 
+            // Compressor gain (dB domain)
             float gain;
-            if (envArr[b] > thresholdLin[b]) {
-                float r = envArr[b] / thresholdLin[b];
-                gain = 1.0f / (1.0f + ratio_factor_arr[b] * (r - 1.0f));
+            float envDb = linToDb(envArr[b]);
+            if (envDb > thresholdDbArr[b]) {
+                float over = envDb - thresholdDbArr[b];
+                float gainDb = thresholdDbArr[b] + over / ratio - envDb;
+                gain = dbToLin(gainDb);
             } else {
                 gain = 1.0f;
             }
-            gain = fminf(gain, 1.0f);
             s *= gain;
             s *= makeupLin[b];
             bandSum += s;
