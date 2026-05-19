@@ -486,10 +486,17 @@ void debug_stop_capture_ffi() {
 int32_t debug_save_capture_ffi(const char* filePath, int32_t source) {
     std::lock_guard<std::mutex> lk(gEngine.capMu_);
     const std::vector<float>& buf = (source == 0) ? gEngine.capIn_ : gEngine.capOut_;
-    std::ofstream f(filePath, std::ios::binary);
-    if (!f) return -1;
-    f.write(reinterpret_cast<const char*>(buf.data()),
-            (std::streamsize)(buf.size()*sizeof(float)));
+    
+    int sr = 48000;
+    if (gEngine.inputStream_) {
+        sr = gEngine.inputStream_->getSampleRate();
+    } else if (gEngine.outputStream_) {
+        sr = gEngine.outputStream_->getSampleRate();
+    }
+
+    if (!write_wav_mono16(filePath, buf, sr)) {
+        return -1;
+    }
     return (int32_t)buf.size();
 }
 
