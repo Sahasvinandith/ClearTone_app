@@ -22,6 +22,36 @@ static inline float clampf(float x, float lo, float hi) {
 static inline float db_to_lin(float db)  { return std::pow(10.0f, db / 20.0f); }
 static inline float lin_to_db(float lin) { return 20.0f * std::log10(std::max(lin, 1e-12f)); }
 
+// ---- Fast math for DSP hot path -------------------------------------------
+// Replace std::log10/std::pow with bit-trick log2/exp2 (~10x faster).
+
+static inline float fast_log2f(float x) {
+    union { float f; int32_t i; } u;
+    u.f = x;
+    float e = (float)((u.i >> 23) - 127);
+    u.i = (u.i & 0x007FFFFF) | 0x3F800000;
+    // Minimax polynomial for log2 on [1,2)
+    return e + (-1.3465551f + u.f * (2.2851935f + u.f * (-0.8543256f)));
+}
+
+static inline float fast_exp2f(float x) {
+    float xi = std::floor(x);
+    float xf = x - xi;
+    union { float f; int32_t i; } u;
+    u.i = ((int32_t)xi + 127) << 23;
+    float p = 1.f + xf * (0.6931472f + xf * (0.2402265f + xf * 0.0555041f));
+    return u.f * p;
+}
+
+// log10(x)*20  →  log2(x)*6.02060
+static inline float fast_lin_to_db(float lin) {
+    return fast_log2f(std::max(lin, 1e-12f)) * 6.02060f;
+}
+// 10^(db/20)  →  2^(db*0.16610)
+static inline float fast_db_to_lin(float db) {
+    return fast_exp2f(db * 0.16609640f);
+}
+
 // ---- Biquad (Butterworth 2nd order) ----------------------------------------
 
 struct Biquad {
@@ -107,21 +137,25 @@ struct Crossover6 {
 struct Compressor {
     float fs=48000.f, thresholdDb=-25.f, ratio=4.f;
     float attackMs=20.f, releaseMs=250.f, env=0.f;
+    float ac_=0.f, rc_=0.f;  // pre-computed per-sample coefficients
 
-    void init(float sampleRate) { fs = sampleRate; env = 0.f; }
+    void updateCoeffs() {
+        ac_ = std::exp(-1.f / (fs * (attackMs  * 0.001f)));
+        rc_ = std::exp(-1.f / (fs * (releaseMs * 0.001f)));
+    }
+
+    void init(float sampleRate) { fs = sampleRate; env = 0.f; updateCoeffs(); }
 
     inline float process(float x) {
         float ax = std::fabs(x);
-        float ac = std::exp(-1.f/(fs*(attackMs*0.001f)));
-        float rc = std::exp(-1.f/(fs*(releaseMs*0.001f)));
-        env = ax > env ? ac*env+(1-ac)*ax : rc*env+(1-rc)*ax;
-        float envDb = lin_to_db(env);
+        env = ax > env ? ac_*env+(1-ac_)*ax : rc_*env+(1-rc_)*ax;
+        float envDb = fast_lin_to_db(env);
         float gainDb = 0.f;
         if (envDb > thresholdDb) {
             float over = envDb - thresholdDb;
             gainDb = thresholdDb + over/ratio - envDb;
         }
-        return x * db_to_lin(gainDb);
+        return x * fast_db_to_lin(gainDb);
     }
 };
 
@@ -170,6 +204,7 @@ public:
             comp_[i].attackMs    = attackMs_;
             comp_[i].releaseMs   = releaseMs_;
             comp_[i].thresholdDb = thresholdDb[i];
+            comp_[i].updateCoeffs();
         }
     }
 
@@ -257,6 +292,11 @@ static bool write_wav_mono16(const std::string& path,
 }
 
 // ---- Oboe engine ------------------------------------------------------------
+// Two-stream design: separate input/output ManagedStreams.
+// FullDuplexStream was attempted but is incompatible with MMAP Exclusive mode
+// on Pixel 7 — its internal read() returns an error from the wrong thread,
+// causing DataCallbackResult::Stop immediately. The two-stream approach handles
+// short/empty reads gracefully by filling silence.
 
 class OboeEngine : public oboe::AudioStreamDataCallback {
 public:
@@ -276,32 +316,37 @@ public:
                                           int32_t numFrames) override {
         auto* out = static_cast<float*>(audioData);
 
-        // Non-blocking read from input stream
+        // Non-blocking read — fills zeros if input has no data yet (MMAP startup)
+        int32_t got = 0;
         if (inputStream_) {
             auto res = inputStream_->read(out, numFrames, 0 /*timeoutNs*/);
-            int32_t got = (res) ? res.value() : 0;
-            if (got < numFrames)
-                std::memset(out + got, 0, (numFrames - got) * sizeof(float));
-        } else {
-            std::memset(out, 0, numFrames * sizeof(float));
+            got = (res) ? res.value() : 0;
         }
+        if (got < numFrames)
+            std::memset(out + got, 0, (numFrames - got) * sizeof(float));
 
         bool cap = capturing_.load(std::memory_order_relaxed);
-        for (int i = 0; i < numFrames; i++) {
-            float in  = out[i];
-            float processed = proc_.process(in);
-            out[i] = processed;
-            if (cap) {
-                std::lock_guard<std::mutex> lk(capMu_);
-                capIn_.push_back(in);
-                capOut_.push_back(processed);
-            }
+        if (cap) {
+            // Capture raw mic samples before processing
+            std::lock_guard<std::mutex> lk(capMu_);
+            capIn_.insert(capIn_.end(), out, out + numFrames);
         }
+
+        for (int i = 0; i < numFrames; i++) {
+            out[i] = proc_.process(out[i]);
+        }
+
+        // Lock once per callback for output capture
+        if (cap) {
+            std::lock_guard<std::mutex> lk(capMu_);
+            capOut_.insert(capOut_.end(), out, out + numFrames);
+        }
+
         return oboe::DataCallbackResult::Continue;
     }
 
-    int start(int32_t inputDeviceId) {
-        if (running_) stop();
+    int startEngine(int32_t inputDeviceId) {
+        if (running_) stopEngine();
 
         oboe::AudioStreamBuilder inB;
         inB.setDirection(oboe::Direction::Input)
@@ -309,14 +354,15 @@ public:
            ->setChannelCount(1)
            ->setFormat(oboe::AudioFormat::Float)
            ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
-           ->setSharingMode(oboe::SharingMode::Exclusive);
+           ->setSharingMode(oboe::SharingMode::Exclusive)
+           ->setInputPreset(oboe::InputPreset::VoicePerformance);
 
         auto inRes = inB.openManagedStream(inputStream_);
         if (inRes != oboe::Result::OK) {
             LOGE("Failed to open input stream: %s", oboe::convertToText(inRes));
             return -1;
         }
-
+        inputStream_->setBufferSizeInFrames(inputStream_->getFramesPerBurst() * 2);
         proc_.init((float)inputStream_->getSampleRate());
 
         oboe::AudioStreamBuilder outB;
@@ -335,15 +381,20 @@ public:
             inputStream_->close();
             return -2;
         }
+        outputStream_->setBufferSizeInFrames(outputStream_->getFramesPerBurst() * 2);
 
         inputStream_->requestStart();
         outputStream_->requestStart();
         running_ = true;
-        LOGI("Streams started. SR=%d", inputStream_->getSampleRate());
+        LOGI("Streams started. SR=%d, inBurst=%d, outBurst=%d",
+             inputStream_->getSampleRate(),
+             inputStream_->getFramesPerBurst(),
+             outputStream_->getFramesPerBurst());
         return 0;
     }
 
-    int stop() {
+    int stopEngine() {
+        // Stop output first to halt the callback before closing input
         if (outputStream_) outputStream_->requestStop();
         if (inputStream_)  inputStream_->requestStop();
         running_ = false;
@@ -409,11 +460,11 @@ int32_t process_audio_file_ffi(
 }
 
 int32_t start_rt_stream_ffi(int32_t inputDeviceId) {
-    return gEngine.start(inputDeviceId);
+    return gEngine.startEngine(inputDeviceId);
 }
 
 int32_t stop_rt_stream_ffi() {
-    return gEngine.stop();
+    return gEngine.stopEngine();
 }
 
 int32_t update_rt_params_ffi(const float* loss6) {

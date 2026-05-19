@@ -86,6 +86,10 @@ class AudioEngineFFI {
   late final _SetAudioUsageDart _setAudioUsage;
   late final _IsPlayingDart _isPlaying;
 
+  // Persistent native buffer for updateRtParams — avoids calloc/free on every
+  // slider change (which fires many times per second during a drag).
+  final Pointer<Float> _rtLossBuffer = calloc<Float>(6);
+
   AudioEngineFFI._internal() {
     if (Platform.isAndroid) {
       _lib = DynamicLibrary.open('libcleartone_audio_engine.so');
@@ -203,21 +207,13 @@ class AudioEngineFFI {
 
   /// Updates the hearing loss profile for the active real-time stream.
   int updateRtParams(List<double> loss6) {
-    print("Update Rt Params: $loss6");
     if (loss6.length != 6) {
       throw ArgumentError('loss6 must contain exactly 6 elements');
     }
-
-    final Pointer<Float> loss6Ptr = calloc<Float>(6);
     for (int i = 0; i < 6; i++) {
-      loss6Ptr[i] = loss6[i];
+      _rtLossBuffer[i] = loss6[i];
     }
-
-    try {
-      return _updateRtParams(loss6Ptr);
-    } finally {
-      calloc.free(loss6Ptr);
-    }
+    return _updateRtParams(_rtLossBuffer);
   }
 
   /// Starts capturing input audio samples for debugging.
