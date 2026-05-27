@@ -70,6 +70,9 @@ typedef _SetAudioUsageDart = void Function(int usage);
 typedef _IsPlayingC = Uint8 Function();
 typedef _IsPlayingDart = int Function();
 
+typedef _SetEnvironmentModeC = Int32 Function(Int32 mode);
+typedef _SetEnvironmentModeDart = int Function(int mode);
+
 class AudioEngineFFI {
   static final AudioEngineFFI _instance = AudioEngineFFI._internal();
   factory AudioEngineFFI() => _instance;
@@ -85,6 +88,7 @@ class AudioEngineFFI {
   late final _DebugGetCaptureSizeDart _debugGetCaptureSize;
   late final _SetAudioUsageDart _setAudioUsage;
   late final _IsPlayingDart _isPlaying;
+  late final _SetEnvironmentModeDart _setEnvironmentMode;
 
   // Persistent native buffer for updateRtParams — avoids calloc/free on every
   // slider change (which fires many times per second during a drag).
@@ -135,6 +139,10 @@ class AudioEngineFFI {
 
     _isPlaying = _lib.lookupFunction<_IsPlayingC, _IsPlayingDart>(
       'is_playing_ffi',
+    );
+
+    _setEnvironmentMode = _lib.lookupFunction<_SetEnvironmentModeC, _SetEnvironmentModeDart>(
+      'set_environment_mode_ffi',
     );
   }
 
@@ -250,5 +258,10 @@ class AudioEngineFFI {
 
   bool isPlaying() {
     return _isPlaying() != 0;
+  }
+
+  /// Sets the environment mode (0 = Standard, 1 = Transit, 2 = Conversation).
+  int setEnvironmentMode(int mode) {
+    return _setEnvironmentMode(mode);
   }
 }

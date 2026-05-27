@@ -41,6 +41,7 @@ class _AmplificationScreenState extends State<AmplificationScreen>
   int? _selectedDeviceId;
   bool _isRtStreaming = false;
   bool _isCommunicationMode = true; // Default to VoiceCommunication
+  int _environmentMode = 0; // 0=Standard, 1=Transit, 2=Conversation
   Timer? _reconnectTimer;
 
   // Real-time sliders
@@ -256,6 +257,13 @@ class _AmplificationScreenState extends State<AmplificationScreen>
     if (_isRtStreaming) {
       _audioEngine.updateRtParams(_rtLosses);
     }
+  }
+
+  void _onEnvironmentModeChanged(int mode) {
+    setState(() {
+      _environmentMode = mode;
+    });
+    _audioEngine.setEnvironmentMode(mode);
   }
 
   Future<void> _verifyInputFeed() async {
@@ -906,6 +914,44 @@ class _AmplificationScreenState extends State<AmplificationScreen>
                         ),
                       const SizedBox(height: 24),
                       
+                      // Environment Mode Toggle
+                      const Text(
+                        'ENVIRONMENT MODE',
+                        style: TextStyle(
+                          color: Color(0xFF666666),
+                          fontSize: 12,
+                          letterSpacing: 1.2,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF282828),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFF333333)),
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<int>(
+                            value: _environmentMode,
+                            dropdownColor: const Color(0xFF282828),
+                            isExpanded: true,
+                            icon: const Icon(Icons.keyboard_arrow_down, color: Color(0xFFD4AF37)),
+                            style: const TextStyle(color: Colors.white, fontSize: 14),
+                            items: const [
+                              DropdownMenuItem(value: 0, child: Text('Standard Mode')),
+                              DropdownMenuItem(value: 1, child: Text('Transit Mode')),
+                              DropdownMenuItem(value: 2, child: Text('Conversation Mode')),
+                            ],
+                            onChanged: (value) {
+                              if (value != null) _onEnvironmentModeChanged(value);
+                            },
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+
                       // Audio Mode Toggle
                       const Text(
                         'AUDIO MODE',

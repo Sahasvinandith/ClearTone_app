@@ -159,6 +159,33 @@ struct Compressor {
     }
 };
 
+// ---- Downward Expander ------------------------------------------------------
+
+struct Expander {
+    float fs=48000.f, thresholdDb=-40.f, ratio=2.f;
+    float attackMs=5.f, releaseMs=100.f, env=0.f;
+    float ac_=0.f, rc_=0.f;
+
+    void updateCoeffs() {
+        ac_ = std::exp(-1.f / (fs * (attackMs  * 0.001f)));
+        rc_ = std::exp(-1.f / (fs * (releaseMs * 0.001f)));
+    }
+
+    void init(float sampleRate) { fs = sampleRate; env = 0.f; updateCoeffs(); }
+
+    inline float process(float x) {
+        float ax = std::fabs(x);
+        env = ax > env ? ac_*env+(1-ac_)*ax : rc_*env+(1-rc_)*ax;
+        float envDb = fast_lin_to_db(env);
+        float gainDb = 0.f;
+        if (envDb < thresholdDb) {
+            float under = thresholdDb - envDb;
+            gainDb = -under * (1.f - 1.f/ratio);
+        }
+        return x * fast_db_to_lin(gainDb);
+    }
+};
+
 // ---- Soft limiter -----------------------------------------------------------
 
 struct SoftLimiter {
@@ -173,6 +200,12 @@ struct SoftLimiter {
 };
 
 // ---- Real-time processor ----------------------------------------------------
+
+enum EnvironmentMode {
+    MODE_STANDARD = 0,
+    MODE_TRANSIT = 1,
+    MODE_CONVERSATION = 2
+};
 
 class RealtimeProcessor {
 public:
@@ -189,7 +222,9 @@ public:
 
     Crossover6  xo_;
     Compressor  comp_[kBands];
+    Expander    expander_;
     SoftLimiter lim_;
+    EnvironmentMode currentMode_ = MODE_STANDARD;
 
     RealtimeProcessor() {
         for (int i = 0; i < kBands; i++) makeupLin[i] = 1.f;
@@ -206,6 +241,56 @@ public:
             comp_[i].thresholdDb = thresholdDb[i];
             comp_[i].updateCoeffs();
         }
+        expander_.init(fs);
+        setMode(currentMode_); // Apply current mode preset
+    }
+
+    void setMode(EnvironmentMode mode) {
+        currentMode_ = mode;
+        if (mode == MODE_TRANSIT) {
+            ratio_ = 8.f;
+            attackMs_ = 2.f;
+            releaseMs_ = 100.f;
+            for (int i = 0; i < kBands; i++) {
+                comp_[i].ratio = ratio_;
+                comp_[i].attackMs = attackMs_;
+                comp_[i].releaseMs = releaseMs_;
+                comp_[i].thresholdDb = -35.f; // more aggressive threshold for transit
+                comp_[i].updateCoeffs();
+            }
+            expander_.ratio = 1.f; // disable expander
+            expander_.updateCoeffs();
+        } else if (mode == MODE_CONVERSATION) {
+            ratio_ = 4.f;
+            attackMs_ = 20.f;
+            releaseMs_ = 250.f;
+            for (int i = 0; i < kBands; i++) {
+                comp_[i].ratio = ratio_;
+                comp_[i].attackMs = attackMs_;
+                comp_[i].releaseMs = releaseMs_;
+                comp_[i].thresholdDb = thresholdDb[i];
+                comp_[i].updateCoeffs();
+            }
+            expander_.thresholdDb = -45.f;
+            expander_.ratio = 4.f;
+            expander_.attackMs = 10.f;
+            expander_.releaseMs = 150.f;
+            expander_.updateCoeffs();
+        } else {
+            // STANDARD
+            ratio_ = 4.f;
+            attackMs_ = 20.f;
+            releaseMs_ = 250.f;
+            for (int i = 0; i < kBands; i++) {
+                comp_[i].ratio = ratio_;
+                comp_[i].attackMs = attackMs_;
+                comp_[i].releaseMs = releaseMs_;
+                comp_[i].thresholdDb = thresholdDb[i];
+                comp_[i].updateCoeffs();
+            }
+            expander_.ratio = 1.f; // disable expander
+            expander_.updateCoeffs();
+        }
     }
 
     // loss6 values are hearing-loss dB (0-60 typical)
@@ -220,9 +305,19 @@ public:
         float b[kBands];
         xo_.split(x, b);
         float sumOn = 0.f;
-        for (int i = 0; i < kBands; i++)
-            sumOn += comp_[i].process(b[i]) * makeupLin[i];
-        return lim_.process((dry_*x + wet_*sumOn) * masterLin_);
+        for (int i = 0; i < kBands; i++) {
+            float gain = makeupLin[i];
+            if (currentMode_ == MODE_CONVERSATION) {
+                // Speech banana focus (cut lowest and highest bands by ~6dB)
+                if (i == 0 || i == 5) gain *= 0.5f; 
+            }
+            sumOn += comp_[i].process(b[i]) * gain;
+        }
+        float out = (dry_*x + wet_*sumOn) * masterLin_;
+        if (currentMode_ == MODE_CONVERSATION) {
+            out = expander_.process(out);
+        }
+        return lim_.process(out);
     }
 };
 
@@ -305,6 +400,8 @@ public:
     RealtimeProcessor   proc_;
     int32_t             audioUsage_ = (int32_t)oboe::Usage::VoiceCommunication;
     std::atomic<bool>   running_{false};
+    int32_t             currentDeviceId_ = 0;
+    EnvironmentMode     currentMode_ = MODE_STANDARD;
 
     // debug capture
     std::vector<float>  capIn_, capOut_;
@@ -347,6 +444,14 @@ public:
 
     int startEngine(int32_t inputDeviceId) {
         if (running_) stopEngine();
+        currentDeviceId_ = inputDeviceId;
+
+        oboe::InputPreset preset = oboe::InputPreset::VoicePerformance;
+        if (currentMode_ == MODE_TRANSIT) {
+            preset = oboe::InputPreset::Camcorder;
+        } else if (currentMode_ == MODE_CONVERSATION) {
+            preset = oboe::InputPreset::VoiceCommunication;
+        }
 
         oboe::AudioStreamBuilder inB;
         inB.setDirection(oboe::Direction::Input)
@@ -355,7 +460,7 @@ public:
            ->setFormat(oboe::AudioFormat::Float)
            ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
            ->setSharingMode(oboe::SharingMode::Exclusive)
-           ->setInputPreset(oboe::InputPreset::VoicePerformance);
+           ->setInputPreset(preset);
 
         auto inRes = inB.openManagedStream(inputStream_);
         if (inRes != oboe::Result::OK) {
@@ -400,6 +505,15 @@ public:
         running_ = false;
         LOGI("Streams stopped.");
         return 0;
+    }
+
+    void setEnvironmentMode(EnvironmentMode mode) {
+        currentMode_ = mode;
+        proc_.setMode(mode);
+        if (running_) {
+            // Restart to apply new InputPreset
+            startEngine(currentDeviceId_);
+        }
     }
 };
 
@@ -511,6 +625,11 @@ void set_audio_usage_ffi(int32_t usage) {
 
 uint8_t is_playing_ffi() {
     return gEngine.running_.load() ? 1 : 0;
+}
+
+int32_t set_environment_mode_ffi(int32_t mode) {
+    gEngine.setEnvironmentMode(static_cast<EnvironmentMode>(mode));
+    return 0;
 }
 
 } // extern "C"
