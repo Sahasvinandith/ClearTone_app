@@ -73,6 +73,9 @@ typedef _IsPlayingDart = int Function();
 typedef _SetEnvironmentModeC = Int32 Function(Int32 mode);
 typedef _SetEnvironmentModeDart = int Function(int mode);
 
+typedef _SetExpanderEnabledC = Int32 Function(Int32 enabled);
+typedef _SetExpanderEnabledDart = int Function(int enabled);
+
 class AudioEngineFFI {
   static final AudioEngineFFI _instance = AudioEngineFFI._internal();
   factory AudioEngineFFI() => _instance;
@@ -89,6 +92,7 @@ class AudioEngineFFI {
   late final _SetAudioUsageDart _setAudioUsage;
   late final _IsPlayingDart _isPlaying;
   late final _SetEnvironmentModeDart _setEnvironmentMode;
+  late final _SetExpanderEnabledDart _setExpanderEnabled;
 
   // Persistent native buffer for updateRtParams — avoids calloc/free on every
   // slider change (which fires many times per second during a drag).
@@ -143,6 +147,10 @@ class AudioEngineFFI {
 
     _setEnvironmentMode = _lib.lookupFunction<_SetEnvironmentModeC, _SetEnvironmentModeDart>(
       'set_environment_mode_ffi',
+    );
+
+    _setExpanderEnabled = _lib.lookupFunction<_SetExpanderEnabledC, _SetExpanderEnabledDart>(
+      'set_expander_enabled_ffi',
     );
   }
 
@@ -263,5 +271,11 @@ class AudioEngineFFI {
   /// Sets the environment mode (0 = Standard, 1 = Transit, 2 = Conversation).
   int setEnvironmentMode(int mode) {
     return _setEnvironmentMode(mode);
+  }
+
+  /// Enables or disables the downward expander (noise gate) in Conversation Mode.
+  /// Use for diagnostics — toggle off to test if the expander causes fogginess.
+  int setExpanderEnabled(bool enabled) {
+    return _setExpanderEnabled(enabled ? 1 : 0);
   }
 }

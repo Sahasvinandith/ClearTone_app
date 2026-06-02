@@ -632,4 +632,10 @@ int32_t set_environment_mode_ffi(int32_t mode) {
     return 0;
 }
 
+int32_t set_expander_enabled_ffi(int32_t enabled) {
+    gEngine.proc_.expander_.ratio = (enabled != 0) ? 4.f : 1.f;
+    gEngine.proc_.expander_.updateCoeffs();
+    return 0;
+}
+
 } // extern "C"

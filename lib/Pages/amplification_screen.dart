@@ -42,6 +42,7 @@ class _AmplificationScreenState extends State<AmplificationScreen>
   bool _isRtStreaming = false;
   bool _isCommunicationMode = true; // Default to VoiceCommunication
   int _environmentMode = 0; // 0=Standard, 1=Transit, 2=Conversation
+  bool _expanderEnabled = true; // Conversation Mode diagnostic toggle
   Timer? _reconnectTimer;
 
   // Real-time sliders
@@ -277,6 +278,7 @@ class _AmplificationScreenState extends State<AmplificationScreen>
   void _onEnvironmentModeChanged(int mode) {
     setState(() {
       _environmentMode = mode;
+      _expanderEnabled = true; // reset to default when switching modes
     });
     _audioEngine.setEnvironmentMode(mode);
   }
@@ -965,6 +967,43 @@ class _AmplificationScreenState extends State<AmplificationScreen>
                           ),
                         ),
                       ),
+                      if (_environmentMode == 2) ...[
+                        const SizedBox(height: 12),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF282828),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFF333333)),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Noise Gate (Expander)',
+                                    style: TextStyle(color: Colors.white, fontSize: 14),
+                                  ),
+                                  Text(
+                                    _expanderEnabled ? 'ON — attenuates silence between words' : 'OFF — bypassed for testing',
+                                    style: const TextStyle(color: Colors.white54, fontSize: 11),
+                                  ),
+                                ],
+                              ),
+                              Switch(
+                                value: _expanderEnabled,
+                                activeColor: const Color(0xFFD4AF37),
+                                onChanged: (value) {
+                                  setState(() => _expanderEnabled = value);
+                                  _audioEngine.setExpanderEnabled(value);
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 24),
 
                       // Audio Mode Toggle
