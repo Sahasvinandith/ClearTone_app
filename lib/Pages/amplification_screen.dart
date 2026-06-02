@@ -134,13 +134,28 @@ class _AmplificationScreenState extends State<AmplificationScreen>
     // Start with the loss from the user profile, but make it controllable
     if (widget.profile.testResults.isNotEmpty) {
       final latestResult = widget.profile.testResults.last;
-      List<int> sortedFreqs = latestResult.leftEarResults.keys.toList()..sort();
+      final leftResults = latestResult.leftEarResults;
+      final rightResults = latestResult.rightEarResults;
+      final bool leftSkipped = leftResults.isEmpty;
+      final bool rightSkipped = rightResults.isEmpty;
+
+      // Use whichever ear has data to get the frequency key list
+      List<int> sortedFreqs =
+          (!leftSkipped ? leftResults.keys : rightResults.keys).toList()..sort();
+
       List<double> avgLoss = [];
       for (int freq in sortedFreqs) {
-        double left = latestResult.leftEarResults[freq]?.toDouble() ?? 0.0;
-        double right = latestResult.rightEarResults[freq]?.toDouble() ?? 0.0;
-        avgLoss.add((left + right) / 2.0);
+        if (leftSkipped) {
+          avgLoss.add(rightResults[freq]?.toDouble() ?? 0.0);
+        } else if (rightSkipped) {
+          avgLoss.add(leftResults[freq]?.toDouble() ?? 0.0);
+        } else {
+          double left = leftResults[freq]?.toDouble() ?? 0.0;
+          double right = rightResults[freq]?.toDouble() ?? 0.0;
+          avgLoss.add((left + right) / 2.0);
+        }
       }
+
       while (avgLoss.length < 6) avgLoss.add(0.0);
       if (avgLoss.length > 6) avgLoss = avgLoss.sublist(0, 6);
       _rtLosses = avgLoss;

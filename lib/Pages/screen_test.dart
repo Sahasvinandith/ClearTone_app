@@ -30,6 +30,8 @@ class _ScreenTestState extends State<ScreenTest> {
   int _countdown = 3;
   String? currentTestEar;
 
+  static const double _maxAmplitude = 80.0;
+
   // Hughson-Westlake state
   final List<int> _frequencies = [1000, 2000, 4000, 8000, 500, 250];
   int _currentFrequencyIndex = 0;
@@ -139,6 +141,11 @@ class _ScreenTestState extends State<ScreenTest> {
         _isAscending = true;
         _currentAmplitude += 5;
         _debugLogs.add("user not clicked. (initial descent ended) switching to ${_currentAmplitude.toInt()} db.");
+        if (_currentAmplitude >= _maxAmplitude) {
+          _debugLogs.add(">>> MAX AMPLITUDE REACHED (${_maxAmplitude.toInt()} dB) — skipping frequency ${_frequencies[_currentFrequencyIndex]} Hz <<<");
+          _skipCurrentFrequency();
+          return;
+        }
         _playNextTone();
       }
       return;
@@ -182,10 +189,20 @@ class _ScreenTestState extends State<ScreenTest> {
         _isAscending = true;
         _currentAmplitude += 5;
         _debugLogs.add("user not clicked. (descending ended) switching to ${_currentAmplitude.toInt()} db. (ascending)");
+        if (_currentAmplitude >= _maxAmplitude) {
+          _debugLogs.add(">>> MAX AMPLITUDE REACHED (${_maxAmplitude.toInt()} dB) — skipping frequency ${_frequencies[_currentFrequencyIndex]} Hz <<<");
+          _skipCurrentFrequency();
+          return;
+        }
       } else {
         // Ascending and still can't hear — keep ascending
         _currentAmplitude += 5;
         _debugLogs.add("user not clicked. (ascending) switching to ${_currentAmplitude.toInt()} db.");
+        if (_currentAmplitude >= _maxAmplitude) {
+          _debugLogs.add(">>> MAX AMPLITUDE REACHED (${_maxAmplitude.toInt()} dB) — skipping frequency ${_frequencies[_currentFrequencyIndex]} Hz <<<");
+          _skipCurrentFrequency();
+          return;
+        }
       }
     }
 
@@ -224,6 +241,37 @@ class _ScreenTestState extends State<ScreenTest> {
     _confirmCount = 0;
   }
 
+  void _skipCurrentFrequency() {
+    _responseTimer?.cancel();
+    _audioGenerator.stopTone();
+    if (_currentFrequencyIndex < _frequencies.length - 1) {
+      _currentFrequencyIndex++;
+      _resetFrequencyVariables();
+      _playNextTone();
+    } else if (_currentEar == "left") {
+      _currentEar = "right";
+      _currentFrequencyIndex = 0;
+      _resetFrequencyVariables();
+      _playNextTone();
+    } else {
+      _finishTest();
+    }
+  }
+
+  void _skipCurrentEar() {
+    _responseTimer?.cancel();
+    _audioGenerator.stopTone();
+    _debugLogs.add(">>> EAR SKIPPED: ${_currentEar.toUpperCase()} <<<");
+    if (_currentEar == "left") {
+      _currentEar = "right";
+      _currentFrequencyIndex = 0;
+      _resetFrequencyVariables();
+      _playNextTone();
+    } else {
+      _finishTest();
+    }
+  }
+
   Future<void> _finishTest() async {
     _responseTimer?.cancel();
     final result = HearingTestResult(
@@ -257,7 +305,20 @@ class _ScreenTestState extends State<ScreenTest> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text("HI, ${widget.profile.name.toUpperCase()}")),
+      appBar: AppBar(
+        title: Text("HI, ${widget.profile.name.toUpperCase()}"),
+        actions: _countdown == 0
+            ? [
+                TextButton(
+                  onPressed: _skipCurrentEar,
+                  child: const Text(
+                    "SKIP EAR",
+                    style: TextStyle(color: Color(0xFFD4AF37), letterSpacing: 1),
+                  ),
+                ),
+              ]
+            : null,
+      ),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(20.0),
