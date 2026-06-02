@@ -14,6 +14,17 @@ class ResultsScreen extends StatefulWidget {
   State<ResultsScreen> createState() => _ResultsScreenState();
 }
 
+// Maps audiogram frequencies to evenly-spaced log-scale x positions.
+// Each step = one octave, matching real-world audiogram spacing.
+const Map<int, double> _freqToX = {
+  250: 0,
+  500: 1,
+  1000: 2,
+  2000: 3,
+  4000: 4,
+  8000: 5,
+};
+
 class _ResultsScreenState extends State<ResultsScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
@@ -45,7 +56,7 @@ class _ResultsScreenState extends State<ResultsScreen>
       final sortedEntries = data.entries.toList()
         ..sort((a, b) => a.key.compareTo(b.key));
       final spots = sortedEntries
-          .map((e) => FlSpot(e.key.toDouble(), e.value.toDouble()))
+          .map((e) => FlSpot(_freqToX[e.key] ?? e.key.toDouble(), e.value.toDouble()))
           .toList();
 
       // Adjust opacity based on how old the test is (newest is fully opaque)
@@ -119,33 +130,16 @@ class _ResultsScreenState extends State<ResultsScreen>
                 fontWeight: FontWeight.w600,
                 letterSpacing: 0.5,
               );
-              String text;
-              switch (value.toInt()) {
-                case 250:
-                  text = '250';
-                  break;
-                case 500:
-                  text = '500';
-                  break;
-                case 1000:
-                  text = '1K';
-                  break;
-                case 2000:
-                  text = '2K';
-                  break;
-                case 4000:
-                  text = '4K';
-                  break;
-                case 8000:
-                  text = '8K';
-                  break;
-                default:
-                  return Container();
+              // x positions 0-5 map to octave-spaced frequencies
+              const labels = ['250', '500', '1K', '2K', '4K', '8K'];
+              final index = value.round();
+              if (value != index.toDouble() || index < 0 || index > 5) {
+                return Container();
               }
               return SideTitleWidget(
                 axisSide: meta.axisSide,
                 space: 4,
-                child: Text(text, style: style),
+                child: Text(labels[index], style: style),
               );
             },
           ),
@@ -160,8 +154,8 @@ class _ResultsScreenState extends State<ResultsScreen>
         border: Border.all(color: const Color(0xFF3A3A3A)),
       ),
       lineBarsData: lineBars,
-      minX: 0,
-      maxX: 8250, // Give some space on the right
+      minX: -0.5,
+      maxX: 5.5, // Log-scale: 6 octave positions (0–5) with padding
       minY: 100, // Inverted Y-axis
       maxY: -10, // Inverted Y-axis
     );
@@ -188,7 +182,7 @@ class _ResultsScreenState extends State<ResultsScreen>
       final leftSortedEntries = results[i].leftEarResults.entries.toList()
         ..sort((a, b) => a.key.compareTo(b.key));
       final leftSpots = leftSortedEntries
-          .map((e) => FlSpot(e.key.toDouble(), e.value.toDouble()))
+          .map((e) => FlSpot(_freqToX[e.key] ?? e.key.toDouble(), e.value.toDouble()))
           .toList();
 
       lineBars.add(
@@ -215,7 +209,7 @@ class _ResultsScreenState extends State<ResultsScreen>
       final rightSortedEntries = results[i].rightEarResults.entries.toList()
         ..sort((a, b) => a.key.compareTo(b.key));
       final rightSpots = rightSortedEntries
-          .map((e) => FlSpot(e.key.toDouble(), e.value.toDouble()))
+          .map((e) => FlSpot(_freqToX[e.key] ?? e.key.toDouble(), e.value.toDouble()))
           .toList();
 
       lineBars.add(
@@ -283,33 +277,15 @@ class _ResultsScreenState extends State<ResultsScreen>
                 fontWeight: FontWeight.w600,
                 letterSpacing: 0.5,
               );
-              String text;
-              switch (value.toInt()) {
-                case 250:
-                  text = '250';
-                  break;
-                case 500:
-                  text = '500';
-                  break;
-                case 1000:
-                  text = '1K';
-                  break;
-                case 2000:
-                  text = '2K';
-                  break;
-                case 4000:
-                  text = '4K';
-                  break;
-                case 8000:
-                  text = '8K';
-                  break;
-                default:
-                  return Container();
+              const labels = ['250', '500', '1K', '2K', '4K', '8K'];
+              final index = value.round();
+              if (value != index.toDouble() || index < 0 || index > 5) {
+                return Container();
               }
               return SideTitleWidget(
                 axisSide: meta.axisSide,
                 space: 4,
-                child: Text(text, style: style),
+                child: Text(labels[index], style: style),
               );
             },
           ),
@@ -324,8 +300,8 @@ class _ResultsScreenState extends State<ResultsScreen>
         border: Border.all(color: const Color(0xFF3A3A3A)),
       ),
       lineBarsData: lineBars,
-      minX: 0,
-      maxX: 8250,
+      minX: -0.5,
+      maxX: 5.5,
       minY: 100,
       maxY: -10,
     );
@@ -510,53 +486,35 @@ class _ResultsScreenState extends State<ResultsScreen>
                 controller: _tabController,
                 children: [
                   // Left Ear Chart
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: SizedBox(
-                      width: 1000,
-                      child: Padding(
-                        padding: const EdgeInsets.only(top: 16.0, right: 16.0),
-                        child: LineChart(
-                          _createChartData(
-                            results,
-                            true, // isLeftEar
-                            const Color(0xFFD4AF37), // Primary Gold
-                          ),
-                        ),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 16.0, right: 16.0),
+                    child: LineChart(
+                      _createChartData(
+                        results,
+                        true, // isLeftEar
+                        const Color(0xFFD4AF37), // Primary Gold
                       ),
                     ),
                   ),
                   // Right Ear Chart
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: SizedBox(
-                      width: 1000,
-                      child: Padding(
-                        padding: const EdgeInsets.only(top: 16.0, right: 16.0),
-                        child: LineChart(
-                          _createChartData(
-                            results,
-                            false, // isLeftEar
-                            Colors.white,
-                          ),
-                        ),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 16.0, right: 16.0),
+                    child: LineChart(
+                      _createChartData(
+                        results,
+                        false, // isLeftEar
+                        Colors.white,
                       ),
                     ),
                   ),
-                  // Right Ear Chart
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: SizedBox(
-                      width: 1000,
-                      child: Padding(
-                        padding: const EdgeInsets.only(top: 16.0, right: 16.0),
-                        child: LineChart(
-                          _createCombinedChartData(
-                            results,
-                            const Color(0xFFD4AF37),
-                            Colors.white,
-                          ),
-                        ),
+                  // Combined Chart
+                  Padding(
+                    padding: const EdgeInsets.only(top: 16.0, right: 16.0),
+                    child: LineChart(
+                      _createCombinedChartData(
+                        results,
+                        const Color(0xFFD4AF37),
+                        Colors.white,
                       ),
                     ),
                   ),
