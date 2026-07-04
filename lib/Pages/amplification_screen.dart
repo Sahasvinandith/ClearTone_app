@@ -42,7 +42,7 @@ class _AmplificationScreenState extends State<AmplificationScreen>
   bool _isRtStreaming = false;
   bool _isCommunicationMode = true; // Default to VoiceCommunication
   int _environmentMode = 0; // 0=Standard, 1=Transit, 2=Conversation
-  bool _expanderEnabled = true; // Conversation Mode diagnostic toggle
+  bool _expanderEnabled = true; // Conversation Mode suppression diagnostic toggle
   Timer? _reconnectTimer;
 
   // Real-time sliders
@@ -983,11 +983,11 @@ class _AmplificationScreenState extends State<AmplificationScreen>
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   const Text(
-                                    'Noise Gate (Expander)',
+                                    'Own-Voice Suppression',
                                     style: TextStyle(color: Colors.white, fontSize: 14),
                                   ),
                                   Text(
-                                    _expanderEnabled ? 'ON — attenuates silence between words' : 'OFF — bypassed for testing',
+                                    _expanderEnabled ? 'ON - reduces speech feedback' : 'OFF - bypassed for testing',
                                     style: const TextStyle(color: Colors.white54, fontSize: 11),
                                   ),
                                 ],

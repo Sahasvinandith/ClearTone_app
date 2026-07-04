@@ -186,6 +186,103 @@ struct Expander {
     }
 };
 
+// ---- Conversation speech enhancer -----------------------------------------
+
+struct ConversationEnhancer {
+    static constexpr int kBands = 6;
+
+    float fs=48000.f;
+    float power_[kBands];
+    float noise_[kBands];
+    float gain_[kBands];
+    float pAttack_=0.f, pRelease_=0.f;
+    float noiseRise_=0.f, noiseFall_=0.f, noiseHoldRise_=0.f;
+    float gainDown_=0.f, gainUp_=0.f;
+    float ownVoiceGain_=1.f;
+    bool enabled_=true;
+
+    void updateCoeffs() {
+        pAttack_      = std::exp(-1.f / (fs * 0.004f));
+        pRelease_     = std::exp(-1.f / (fs * 0.060f));
+        noiseRise_    = std::exp(-1.f / (fs * 0.350f));
+        noiseFall_    = std::exp(-1.f / (fs * 0.080f));
+        noiseHoldRise_= std::exp(-1.f / (fs * 3.000f));
+        gainDown_     = std::exp(-1.f / (fs * 0.008f));
+        gainUp_       = std::exp(-1.f / (fs * 0.180f));
+    }
+
+    void reset() {
+        for (int i = 0; i < kBands; i++) {
+            power_[i] = 1e-8f;
+            noise_[i] = 1e-7f;
+            gain_[i] = 1.f;
+        }
+        ownVoiceGain_ = 1.f;
+    }
+
+    void init(float sampleRate) {
+        fs = sampleRate;
+        updateCoeffs();
+        reset();
+    }
+
+    inline void process(float b[kBands]) {
+        if (!enabled_) return;
+
+        for (int i = 0; i < kBands; i++) {
+            float p = b[i] * b[i] + 1e-12f;
+            float c = p > power_[i] ? pAttack_ : pRelease_;
+            power_[i] = c * power_[i] + (1.f - c) * p;
+        }
+
+        float voicePower = 0.60f * power_[1] + power_[2] + power_[3] + 0.55f * power_[4];
+        float voiceNoise = 0.60f * noise_[1] + noise_[2] + noise_[3] + 0.55f * noise_[4] + 1e-12f;
+        bool voicePresent = (voicePower / voiceNoise) > 2.2f;
+        float voiceDb = fast_lin_to_db(std::sqrt(voicePower));
+        float ownVoiceAmount = clampf((voiceDb + 36.f) / 16.f, 0.f, 1.f);
+        float ownVoiceTarget = voicePresent ? (1.f - 0.72f * ownVoiceAmount) : 1.f;
+        float ownVoiceCoeff = ownVoiceTarget < ownVoiceGain_ ? gainDown_ : gainUp_;
+        ownVoiceGain_ = ownVoiceCoeff * ownVoiceGain_ + (1.f - ownVoiceCoeff) * ownVoiceTarget;
+
+        static constexpr float minGain[kBands] = {
+            0.12f, 0.22f, 0.30f, 0.30f, 0.24f, 0.16f
+        };
+        static constexpr float speechMinGain[kBands] = {
+            0.12f, 0.55f, 0.68f, 0.68f, 0.58f, 0.16f
+        };
+
+        for (int i = 0; i < kBands; i++) {
+            float n = noise_[i];
+            float p = power_[i];
+            bool speechBand = i >= 1 && i <= 4;
+            bool bandSpeechPresent = speechBand && (voicePresent || (p / (n + 1e-12f)) > 3.5f);
+
+            float nc;
+            if (p < n) {
+                nc = noiseFall_;
+            } else {
+                nc = bandSpeechPresent ? noiseHoldRise_ : noiseRise_;
+            }
+            noise_[i] = nc * n + (1.f - nc) * p;
+            noise_[i] = clampf(noise_[i], 1e-10f, 0.25f);
+
+            float postSnr = p / (noise_[i] + 1e-12f);
+            float wiener = 1.f - (1.f / std::max(postSnr, 1.f));
+            float target = std::sqrt(clampf(wiener, 0.f, 1.f));
+            float floor = bandSpeechPresent ? speechMinGain[i] : minGain[i];
+            target = clampf(target, floor, 1.f);
+
+            float gc = target < gain_[i] ? gainDown_ : gainUp_;
+            gain_[i] = gc * gain_[i] + (1.f - gc) * target;
+            float appliedGain = gain_[i];
+            if (speechBand) {
+                appliedGain *= ownVoiceGain_;
+            }
+            b[i] *= appliedGain;
+        }
+    }
+};
+
 // ---- Soft limiter -----------------------------------------------------------
 
 struct SoftLimiter {
@@ -211,10 +308,10 @@ class RealtimeProcessor {
 public:
     static constexpr int kBands = 6;
 
-    float thresholdDb[kBands] = {-18,-22,-26,-30,-34,-36};
-    float ratio_    = 4.f;
-    float attackMs_ = 20.f;
-    float releaseMs_= 250.f;
+    float thresholdDb[kBands] = {-10,-12,-14,-16,-18,-20};
+    float ratio_    = 2.f;
+    float attackMs_ = 5.f;
+    float releaseMs_= 80.f;
     float makeupLin[kBands];
     float wet_      = 1.f;
     float dry_      = 0.f;
@@ -223,6 +320,7 @@ public:
     Crossover6  xo_;
     Compressor  comp_[kBands];
     Expander    expander_;
+    ConversationEnhancer conversation_;
     SoftLimiter lim_;
     EnvironmentMode currentMode_ = MODE_STANDARD;
 
@@ -242,6 +340,7 @@ public:
             comp_[i].updateCoeffs();
         }
         expander_.init(fs);
+        conversation_.init(fs);
         setMode(currentMode_); // Apply current mode preset
     }
 
@@ -261,9 +360,9 @@ public:
             expander_.ratio = 1.f; // disable expander
             expander_.updateCoeffs();
         } else if (mode == MODE_CONVERSATION) {
-            ratio_ = 4.f;
-            attackMs_ = 20.f;
-            releaseMs_ = 250.f;
+            ratio_ = 2.f;
+            attackMs_ = 5.f;
+            releaseMs_ = 80.f;
             for (int i = 0; i < kBands; i++) {
                 comp_[i].ratio = ratio_;
                 comp_[i].attackMs = attackMs_;
@@ -271,16 +370,14 @@ public:
                 comp_[i].thresholdDb = thresholdDb[i];
                 comp_[i].updateCoeffs();
             }
-            expander_.thresholdDb = -45.f;
-            expander_.ratio = 4.f;
-            expander_.attackMs = 10.f;
-            expander_.releaseMs = 150.f;
+            expander_.ratio = 1.f; // conversation uses multiband suppression instead
             expander_.updateCoeffs();
+            conversation_.reset();
         } else {
             // STANDARD
-            ratio_ = 4.f;
-            attackMs_ = 20.f;
-            releaseMs_ = 250.f;
+            ratio_ = 2.f;
+            attackMs_ = 5.f;
+            releaseMs_ = 80.f;
             for (int i = 0; i < kBands; i++) {
                 comp_[i].ratio = ratio_;
                 comp_[i].attackMs = attackMs_;
@@ -304,19 +401,22 @@ public:
     inline float process(float x) {
         float b[kBands];
         xo_.split(x, b);
+        if (currentMode_ == MODE_CONVERSATION) {
+            conversation_.process(b);
+        }
         float sumOn = 0.f;
         for (int i = 0; i < kBands; i++) {
             float gain = makeupLin[i];
             if (currentMode_ == MODE_CONVERSATION) {
-                // Speech banana focus (cut lowest and highest bands by ~6dB)
-                if (i == 0 || i == 5) gain *= 0.5f; 
+                if (i == 0) gain *= 0.70f;
+                if (i == 1) gain *= 1.18f;
+                if (i == 2 || i == 3) gain *= 1.35f;
+                if (i == 4) gain *= 1.22f;
+                if (i == 5) gain *= 0.80f;
             }
             sumOn += comp_[i].process(b[i]) * gain;
         }
         float out = (dry_*x + wet_*sumOn) * masterLin_;
-        if (currentMode_ == MODE_CONVERSATION) {
-            out = expander_.process(out);
-        }
         return lim_.process(out);
     }
 };
@@ -449,9 +549,12 @@ public:
         oboe::InputPreset preset = oboe::InputPreset::VoicePerformance;
         if (currentMode_ == MODE_TRANSIT) {
             preset = oboe::InputPreset::Camcorder;
-        } else if (currentMode_ == MODE_CONVERSATION) {
-            preset = oboe::InputPreset::VoiceCommunication;
         }
+        // Conversation mode intentionally uses VoicePerformance (not VoiceCommunication).
+        // VoiceCommunication enables Android's system AGC + Noise Suppressor, which
+        // creates "foggy" artifacts and gain ducking when speech is detected — exactly
+        // the opposite of what a hearing aid needs. VoicePerformance provides raw mic
+        // input with minimal system processing so our DSP handles everything.
 
         oboe::AudioStreamBuilder inB;
         inB.setDirection(oboe::Direction::Input)
@@ -633,8 +736,10 @@ int32_t set_environment_mode_ffi(int32_t mode) {
 }
 
 int32_t set_expander_enabled_ffi(int32_t enabled) {
-    gEngine.proc_.expander_.ratio = (enabled != 0) ? 4.f : 1.f;
-    gEngine.proc_.expander_.updateCoeffs();
+    gEngine.proc_.conversation_.enabled_ = (enabled != 0);
+    if (enabled != 0) {
+        gEngine.proc_.conversation_.reset();
+    }
     return 0;
 }
 

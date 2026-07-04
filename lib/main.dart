@@ -1,6 +1,5 @@
 import 'package:cleartone/Pages/profile_selection_screen.dart';
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 void main() {
   runApp(const MyApp());
@@ -22,9 +21,10 @@ class MyApp extends StatelessWidget {
           surface: Color(0xFF1C1C1C),
           onSurface: Colors.white,
         ),
-        textTheme: GoogleFonts.spaceGroteskTextTheme(
-          ThemeData.dark().textTheme,
-        ).apply(bodyColor: Colors.white, displayColor: Colors.white),
+        textTheme: ThemeData.dark().textTheme.apply(
+          bodyColor: Colors.white,
+          displayColor: Colors.white,
+        ),
         appBarTheme: const AppBarTheme(
           backgroundColor: Color(0xFF111111),
           centerTitle: true,

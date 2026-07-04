@@ -273,8 +273,8 @@ class AudioEngineFFI {
     return _setEnvironmentMode(mode);
   }
 
-  /// Enables or disables the downward expander (noise gate) in Conversation Mode.
-  /// Use for diagnostics — toggle off to test if the expander causes fogginess.
+  /// Enables or disables conversation-mode speech/noise suppression.
+  /// Use for diagnostics when checking own-voice feedback or voice fading.
   int setExpanderEnabled(bool enabled) {
     return _setExpanderEnabled(enabled ? 1 : 0);
   }
