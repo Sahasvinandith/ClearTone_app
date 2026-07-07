@@ -20,7 +20,12 @@ class _EnvironmentScreenState extends State<EnvironmentScreen>
   EnvironmentResult _latest = EnvironmentResult.initializing;
   bool _isDetecting = false;
 
-  // ---- Pulse animation (fires when mode changes to a definite category) ----
+  // ---- Settings (mirrored locally so sliders update immediately) ----
+  double _silenceThreshold = 0.025;
+  double _hopSeconds = 1.0;
+  bool _useVoteSmoothing = true;
+
+  // ---- Pulse animation ----
   late final AnimationController _pulseCtrl;
   late final Animation<double> _pulseAnim;
   String _lastAnimatedMode = '';
@@ -64,7 +69,6 @@ class _EnvironmentScreenState extends State<EnvironmentScreen>
       return;
     }
 
-    // Request mic permission before starting.
     final status = await Permission.microphone.request();
     if (!status.isGranted) {
       if (mounted) {
@@ -78,14 +82,15 @@ class _EnvironmentScreenState extends State<EnvironmentScreen>
       return;
     }
 
+    // Push current settings to detector before starting.
+    _syncSettingsToDetector();
+
     _resultSub = _detector.results.listen((result) {
       if (!mounted) return;
       setState(() {
         _latest = result;
       });
 
-      // Trigger pulse when a definite mode is detected for the first time or
-      // when the mode changes.
       final bool isDefined =
           result.mode == 'Transportation' || result.mode == 'Conversation';
       if (isDefined && result.mode != _lastAnimatedMode) {
@@ -106,10 +111,29 @@ class _EnvironmentScreenState extends State<EnvironmentScreen>
   }
 
   // ---------------------------------------------------------------------------
+  // Settings helpers
+  // ---------------------------------------------------------------------------
+
+  void _syncSettingsToDetector() {
+    _detector.silenceThreshold = _silenceThreshold;
+    _detector.hopSeconds = _hopSeconds;
+    _detector.useVoteSmoothing = _useVoteSmoothing;
+  }
+
+  void _setThresholdFromRms() {
+    final double rms = _latest.rms;
+    if (rms <= 0.0) return;
+    setState(() {
+      // Round to 4 decimal places for a clean display.
+      _silenceThreshold = double.parse(rms.toStringAsFixed(4));
+    });
+    _detector.silenceThreshold = _silenceThreshold;
+  }
+
+  // ---------------------------------------------------------------------------
   // UI helpers
   // ---------------------------------------------------------------------------
 
-  /// Returns the icon for the current detection mode.
   IconData _iconForMode(String mode) {
     switch (mode) {
       case 'Transportation':
@@ -120,24 +144,23 @@ class _EnvironmentScreenState extends State<EnvironmentScreen>
         return Icons.volume_off_outlined;
       case 'Initializing':
         return Icons.hourglass_empty_outlined;
-      default: // Ambient / Unknown
+      default:
         return Icons.blur_on;
     }
   }
 
-  /// Returns the accent colour for the current mode.
   Color _colorForMode(String mode) {
     switch (mode) {
       case 'Transportation':
-        return const Color(0xFF4FC3F7); // light blue
+        return const Color(0xFF4FC3F7);
       case 'Conversation':
-        return const Color(0xFF81C784); // green
+        return const Color(0xFF81C784);
       case 'Silence':
-        return const Color(0xFF666666); // grey
+        return const Color(0xFF666666);
       case 'Initializing':
         return const Color(0xFF666666);
       default:
-        return const Color(0xFFD4AF37); // gold
+        return const Color(0xFFD4AF37);
     }
   }
 
@@ -181,9 +204,7 @@ class _EnvironmentScreenState extends State<EnvironmentScreen>
                       color: const Color(0xFF1C1C1C),
                       borderRadius: BorderRadius.circular(20),
                       border: Border.all(
-                        color: modeColor.withValues(
-                          alpha: 0.3 + glow * 0.7,
-                        ),
+                        color: modeColor.withValues(alpha: 0.3 + glow * 0.7),
                         width: 1.5 + glow * 2.0,
                       ),
                       boxShadow: glow > 0.0
@@ -203,7 +224,6 @@ class _EnvironmentScreenState extends State<EnvironmentScreen>
                   padding: const EdgeInsets.all(28),
                   child: Column(
                     children: [
-                      // Mode icon
                       Container(
                         width: 80,
                         height: 80,
@@ -223,7 +243,6 @@ class _EnvironmentScreenState extends State<EnvironmentScreen>
                       ),
                       const SizedBox(height: 20),
 
-                      // Mode label
                       Text(
                         _latest.mode.toUpperCase(),
                         textAlign: TextAlign.center,
@@ -236,7 +255,6 @@ class _EnvironmentScreenState extends State<EnvironmentScreen>
                       ),
                       const SizedBox(height: 28),
 
-                      // Confidence bar
                       _buildMetricRow(
                         label: 'CONFIDENCE',
                         trailing: Text(
@@ -259,7 +277,7 @@ class _EnvironmentScreenState extends State<EnvironmentScreen>
                       ),
                       const SizedBox(height: 20),
 
-                      // Stats row
+                      // Stats row: P(conv) + RMS with "Set as threshold" button
                       Row(
                         children: [
                           Expanded(
@@ -271,11 +289,7 @@ class _EnvironmentScreenState extends State<EnvironmentScreen>
                           ),
                           const SizedBox(width: 12),
                           Expanded(
-                            child: _buildStatCard(
-                              label: 'RMS',
-                              value: _latest.rms.toStringAsFixed(4),
-                              color: const Color(0xFF4FC3F7),
-                            ),
+                            child: _buildRmsCard(),
                           ),
                         ],
                       ),
@@ -284,7 +298,12 @@ class _EnvironmentScreenState extends State<EnvironmentScreen>
                 ),
               ),
 
-              const SizedBox(height: 40),
+              const SizedBox(height: 20),
+
+              // ---- Detection Settings card ----
+              _buildSettingsCard(),
+
+              const SizedBox(height: 32),
 
               // ---- Power button ----
               Center(
@@ -324,7 +343,6 @@ class _EnvironmentScreenState extends State<EnvironmentScreen>
               ),
               const SizedBox(height: 14),
 
-              // Status text
               Center(
                 child: Text(
                   _isDetecting ? 'DETECTING...' : 'TAP TO START',
@@ -337,25 +355,6 @@ class _EnvironmentScreenState extends State<EnvironmentScreen>
                 ),
               ),
               const SizedBox(height: 24),
-
-              // Info note
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1C1C1C),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFF2A2A2A)),
-                ),
-                child: const Text(
-                  'Detection runs in background. Updates every 1 second.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Color(0xFF666666),
-                    fontSize: 12,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ),
             ],
           ),
         ),
@@ -364,7 +363,246 @@ class _EnvironmentScreenState extends State<EnvironmentScreen>
   }
 
   // ---------------------------------------------------------------------------
-  // Metric row (label above, widget fills row, optional trailing widget)
+  // Settings card
+  // ---------------------------------------------------------------------------
+
+  Widget _buildSettingsCard() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1C1C1C),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFF2A2A2A)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'DETECTION SETTINGS',
+            style: TextStyle(
+              color: Color(0xFF666666),
+              fontSize: 11,
+              letterSpacing: 1.5,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // Vote smoothing toggle
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'VOTE SMOOTHING',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    _useVoteSmoothing
+                        ? 'Last 5 predictions averaged'
+                        : 'Raw single-window output',
+                    style: const TextStyle(
+                      color: Color(0xFF666666),
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+              Switch(
+                value: _useVoteSmoothing,
+                onChanged: (v) {
+                  setState(() => _useVoteSmoothing = v);
+                  _detector.useVoteSmoothing = v;
+                },
+                activeThumbColor: const Color(0xFFD4AF37),
+                inactiveThumbColor: const Color(0xFF444444),
+                inactiveTrackColor: const Color(0xFF2A2A2A),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 20),
+          const Divider(color: Color(0xFF2A2A2A), height: 1),
+          const SizedBox(height: 20),
+
+          // Silence threshold slider
+          _buildSliderRow(
+            label: 'SILENCE THRESHOLD',
+            valueLabel: _silenceThreshold.toStringAsFixed(4),
+            value: _silenceThreshold,
+            min: 0.001,
+            max: 0.150,
+            onChanged: (v) {
+              setState(() => _silenceThreshold = v);
+              _detector.silenceThreshold = v;
+            },
+          ),
+
+          const SizedBox(height: 20),
+          const Divider(color: Color(0xFF2A2A2A), height: 1),
+          const SizedBox(height: 20),
+
+          // Hop size slider
+          _buildSliderRow(
+            label: 'HOP SIZE',
+            valueLabel: '${_hopSeconds.toStringAsFixed(1)} s',
+            value: _hopSeconds,
+            min: 0.5,
+            max: 4.0,
+            divisions: 7, // 0.5 s steps
+            onChanged: (v) {
+              setState(() => _hopSeconds = v);
+              _detector.hopSeconds = v;
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSliderRow({
+    required String label,
+    required String valueLabel,
+    required double value,
+    required double min,
+    required double max,
+    required ValueChanged<double> onChanged,
+    int? divisions,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.5,
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFF161616),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFF2A2A2A)),
+              ),
+              child: Text(
+                valueLabel,
+                style: const TextStyle(
+                  color: Color(0xFFD4AF37),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ),
+          ],
+        ),
+        SliderTheme(
+          data: SliderTheme.of(context).copyWith(
+            activeTrackColor: const Color(0xFFD4AF37),
+            inactiveTrackColor: const Color(0xFF2A2A2A),
+            thumbColor: const Color(0xFFD4AF37),
+            overlayColor: const Color(0xFFD4AF37).withValues(alpha: 0.15),
+            trackHeight: 3.0,
+          ),
+          child: Slider(
+            value: value,
+            min: min,
+            max: max,
+            divisions: divisions,
+            onChanged: onChanged,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // RMS stat card with "Set as threshold" button
+  // ---------------------------------------------------------------------------
+
+  Widget _buildRmsCard() {
+    final double rms = _latest.rms;
+    final bool canSet = rms > 0.0;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF161616),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF2A2A2A)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'RMS',
+            style: TextStyle(
+              color: Color(0xFF666666),
+              fontSize: 10,
+              letterSpacing: 1.2,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            rms.toStringAsFixed(4),
+            style: const TextStyle(
+              color: Color(0xFF4FC3F7),
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(height: 8),
+          GestureDetector(
+            onTap: canSet ? _setThresholdFromRms : null,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.arrow_upward,
+                  size: 11,
+                  color: canSet
+                      ? const Color(0xFFD4AF37)
+                      : const Color(0xFF444444),
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  'SET AS THRESHOLD',
+                  style: TextStyle(
+                    color: canSet
+                        ? const Color(0xFFD4AF37)
+                        : const Color(0xFF444444),
+                    fontSize: 9,
+                    letterSpacing: 0.8,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Metric row
   // ---------------------------------------------------------------------------
 
   Widget _buildMetricRow({

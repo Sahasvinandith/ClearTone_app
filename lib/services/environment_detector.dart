@@ -54,8 +54,13 @@ class EnvironmentDetectorService {
   // ---- Audio capture constants ----
   static const int _sampleRate = 22050;
   static const int _windowSamples = 88200; // 4 s at 22050 Hz
-  static const int _hopSamples = 22050; // 1 s hop
-  static const double _silenceRmsThreshold = 0.025;
+
+  // ---- Runtime-adjustable parameters ----
+  double silenceThreshold = 0.025;
+  double hopSeconds = 1.0;
+  bool useVoteSmoothing = true;
+
+  int get _hopSamples => (_sampleRate * hopSeconds).round();
 
   // ---- Mel spectrogram constants ----
   static const int _nFft = 2048;
@@ -249,8 +254,13 @@ class EnvironmentDetectorService {
   void _runInference() {
     // 1. Silence check.
     final double rms = _computeRms(_sampleBuf, 0, _windowSamples);
-    if (rms < _silenceRmsThreshold) {
-      _resultCtrl.add(EnvironmentResult.silence);
+    if (rms < silenceThreshold) {
+      _resultCtrl.add(EnvironmentResult(
+        mode: 'Silence',
+        confidence: 0.0,
+        rawProb: 0.0,
+        rms: rms,
+      ));
       return;
     }
 
@@ -282,37 +292,48 @@ class EnvironmentDetectorService {
 
     final double rawProb = output[0][0].clamp(0.0, 1.0);
 
-    // 4. Majority vote.
-    _voteBuffer.add(rawProb);
-    if (_voteBuffer.length > _voteBufferLen) {
-      _voteBuffer.removeAt(0);
-    }
-
-    final int n = _voteBuffer.length;
-    int convCount = 0;
-    int transCount = 0;
-    for (final p in _voteBuffer) {
-      if (p >= _convThreshold) {
-        convCount++;
-      } else {
-        transCount++;
-      }
-    }
-    final double tRatio = transCount / n;
-    final double cRatio = convCount / n;
-
+    // 4. Majority vote (or raw single-sample when smoothing is disabled).
     String mode;
     double confidence;
 
-    if (tRatio >= 0.40 && tRatio > cRatio) {
-      mode = 'Transportation';
-      confidence = 1.0 - rawProb;
-    } else if (cRatio >= 0.35 && cRatio > tRatio) {
-      mode = 'Conversation';
-      confidence = rawProb;
+    if (!useVoteSmoothing) {
+      // Raw mode: classify this window immediately without smoothing.
+      if (rawProb >= _convThreshold) {
+        mode = 'Conversation';
+        confidence = rawProb;
+      } else {
+        mode = 'Transportation';
+        confidence = 1.0 - rawProb;
+      }
     } else {
-      mode = 'Ambient / Unknown';
-      confidence = 1.0 - (rawProb - 0.5).abs() * 2.0; // proximity to boundary
+      _voteBuffer.add(rawProb);
+      if (_voteBuffer.length > _voteBufferLen) {
+        _voteBuffer.removeAt(0);
+      }
+
+      final int n = _voteBuffer.length;
+      int convCount = 0;
+      int transCount = 0;
+      for (final p in _voteBuffer) {
+        if (p >= _convThreshold) {
+          convCount++;
+        } else {
+          transCount++;
+        }
+      }
+      final double tRatio = transCount / n;
+      final double cRatio = convCount / n;
+
+      if (tRatio >= 0.40 && tRatio > cRatio) {
+        mode = 'Transportation';
+        confidence = 1.0 - rawProb;
+      } else if (cRatio >= 0.35 && cRatio > tRatio) {
+        mode = 'Conversation';
+        confidence = rawProb;
+      } else {
+        mode = 'Ambient / Unknown';
+        confidence = 1.0 - (rawProb - 0.5).abs() * 2.0;
+      }
     }
 
     _resultCtrl.add(EnvironmentResult(
