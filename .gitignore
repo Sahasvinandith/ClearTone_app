@@ -12,9 +12,10 @@
 .swiftpm/
 migrate_working_dir/
 
-# Deployment knowledge bases
+# Modification Knowledge Bases
 env_detect/
 sst_integrate/
+
 
 # IntelliJ related
 *.iml
