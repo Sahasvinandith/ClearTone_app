@@ -8,6 +8,7 @@ import 'dart:io';
 import 'dart:async';
 import '../models/profile.dart';
 import '../audio_engine_ffi.dart';
+import '../services/environment_detector.dart';
 
 class AmplificationScreen extends StatefulWidget {
   final Profile profile;
@@ -44,6 +45,15 @@ class _AmplificationScreenState extends State<AmplificationScreen>
   int _environmentMode = 0; // 0=Standard, 1=Transit, 2=Conversation
   bool _expanderEnabled = true; // Conversation Mode suppression diagnostic toggle
   Timer? _reconnectTimer;
+
+  // --- Environment Auto-Detection State ---
+  bool _envDetectEnabled = false;
+  double _envSilenceThreshold = 0.025;
+  double _envHopSize = 1.0;
+  EnvironmentDetectorService? _envDetector;
+  StreamSubscription<EnvironmentResult>? _envSub;
+  String _detectedEnvironment = '';
+  double _detectedConfidence = 0.0;
 
   // Real-time sliders
   final List<int> _rtBands = [
@@ -89,10 +99,76 @@ class _AmplificationScreenState extends State<AmplificationScreen>
     if (_isRtStreaming) {
       _audioEngine.stopRtStream();
     }
+    _envSub?.cancel();
+    _envDetector?.stop().then((_) => _envDetector?.dispose());
     _tabController.dispose();
     _audioRecorder.dispose();
     _audioPlayer.dispose();
     super.dispose();
+  }
+
+  Future<void> _toggleEnvDetection(bool enabled) async {
+    if (enabled) {
+      _envDetector = EnvironmentDetectorService();
+      _envDetector!.silenceThreshold = _envSilenceThreshold;
+      _envDetector!.hopSeconds = _envHopSize;
+      _envSub = _envDetector!.results.listen(_onEnvResult);
+      await _envDetector!.start();
+      if (mounted) setState(() => _envDetectEnabled = true);
+    } else {
+      _envSub?.cancel();
+      await _envDetector?.stop();
+      _envDetector?.dispose();
+      _envDetector = null;
+      _envSub = null;
+      if (mounted) {
+        setState(() {
+          _envDetectEnabled = false;
+          _detectedEnvironment = '';
+          _detectedConfidence = 0.0;
+        });
+      }
+    }
+  }
+
+  void _onEnvResult(EnvironmentResult result) {
+    if (!mounted || !_envDetectEnabled) return;
+
+    int newMode;
+    switch (result.mode) {
+      case 'Silence':
+      case 'Ambient / Unknown':
+        newMode = 0;
+        break;
+      case 'Conversation':
+        newMode = 2;
+        break;
+      case 'Transportation':
+        newMode = 1;
+        break;
+      default:
+        // 'Initializing' - don't change mode yet
+        setState(() {
+          _detectedEnvironment = result.mode;
+          _detectedConfidence = result.confidence;
+        });
+        return;
+    }
+
+    setState(() {
+      _detectedEnvironment = result.mode;
+      _detectedConfidence = result.confidence;
+      if (newMode != _environmentMode) {
+        _environmentMode = newMode;
+        _expanderEnabled = true;
+        if (_isRtStreaming) {
+          _audioEngine.setEnvironmentMode(newMode);
+          if (newMode == 2) {
+            _audioEngine.setExpanderEnabled(true);
+          }
+        }
+      }
+    });
   }
 
   void _startReconnectTimer() {
@@ -930,7 +1006,195 @@ class _AmplificationScreenState extends State<AmplificationScreen>
                           ),
                         ),
                       const SizedBox(height: 24),
-                      
+
+                      // Environment Auto-Detect Toggle
+                      const Text(
+                        'ENVIRONMENT AUTO-DETECT',
+                        style: TextStyle(
+                          color: Color(0xFF666666),
+                          fontSize: 12,
+                          letterSpacing: 1.2,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF282828),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: _envDetectEnabled
+                                ? const Color(0xFFD4AF37).withValues(alpha: 0.5)
+                                : const Color(0xFF333333),
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'Auto Mode Switching',
+                                      style: TextStyle(color: Colors.white, fontSize: 14),
+                                    ),
+                                    Text(
+                                      _envDetectEnabled
+                                          ? 'Detecting environment...'
+                                          : 'Tap to enable adaptive modes',
+                                      style: const TextStyle(
+                                          color: Colors.white54, fontSize: 11),
+                                    ),
+                                  ],
+                                ),
+                                Switch(
+                                  value: _envDetectEnabled,
+                                  activeColor: const Color(0xFFD4AF37),
+                                  onChanged: (value) => _toggleEnvDetection(value),
+                                ),
+                              ],
+                            ),
+                            if (_envDetectEnabled) ...[
+                              const SizedBox(height: 12),
+                              const Divider(color: Color(0xFF333333), height: 1),
+                              const SizedBox(height: 12),
+                              // Detected environment indicator
+                              Row(
+                                children: [
+                                  Container(
+                                    width: 8,
+                                    height: 8,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: _detectedEnvironment.isEmpty ||
+                                              _detectedEnvironment == 'Initializing'
+                                          ? Colors.grey
+                                          : _detectedEnvironment == 'Conversation'
+                                              ? Colors.greenAccent
+                                              : _detectedEnvironment == 'Transportation'
+                                                  ? Colors.orangeAccent
+                                                  : Colors.blueAccent,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    _detectedEnvironment.isEmpty
+                                        ? 'Waiting for data...'
+                                        : _detectedEnvironment,
+                                    style: const TextStyle(
+                                        color: Colors.white70, fontSize: 13),
+                                  ),
+                                  if (_detectedEnvironment.isNotEmpty &&
+                                      _detectedEnvironment != 'Initializing' &&
+                                      _detectedEnvironment != 'Silence') ...[
+                                    const Spacer(),
+                                    Text(
+                                      '${(_detectedConfidence * 100).toStringAsFixed(0)}%',
+                                      style: const TextStyle(
+                                          color: Color(0xFFD4AF37),
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              // Silence Threshold slider
+                              Row(
+                                children: [
+                                  const SizedBox(
+                                    width: 110,
+                                    child: Text(
+                                      'Silence Threshold',
+                                      style: TextStyle(
+                                          color: Colors.white54, fontSize: 11),
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: SliderTheme(
+                                      data: SliderThemeData(
+                                        activeTrackColor: const Color(0xFFD4AF37),
+                                        inactiveTrackColor: const Color(0xFF444444),
+                                        thumbColor: const Color(0xFFD4AF37),
+                                        overlayColor:
+                                            const Color(0xFFD4AF37).withValues(alpha: 0.15),
+                                        trackHeight: 3,
+                                      ),
+                                      child: Slider(
+                                        value: _envSilenceThreshold,
+                                        min: 0.001,
+                                        max: 0.15,
+                                        onChanged: (v) {
+                                          setState(() => _envSilenceThreshold = v);
+                                          _envDetector?.silenceThreshold = v;
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    width: 40,
+                                    child: Text(
+                                      _envSilenceThreshold.toStringAsFixed(3),
+                                      textAlign: TextAlign.right,
+                                      style: const TextStyle(
+                                          color: Color(0xFFD4AF37), fontSize: 11),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              // Hop Size slider
+                              Row(
+                                children: [
+                                  const SizedBox(
+                                    width: 110,
+                                    child: Text(
+                                      'Hop Size (s)',
+                                      style: TextStyle(
+                                          color: Colors.white54, fontSize: 11),
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: SliderTheme(
+                                      data: SliderThemeData(
+                                        activeTrackColor: const Color(0xFFD4AF37),
+                                        inactiveTrackColor: const Color(0xFF444444),
+                                        thumbColor: const Color(0xFFD4AF37),
+                                        overlayColor:
+                                            const Color(0xFFD4AF37).withValues(alpha: 0.15),
+                                        trackHeight: 3,
+                                      ),
+                                      child: Slider(
+                                        value: _envHopSize,
+                                        min: 0.5,
+                                        max: 5.0,
+                                        divisions: 9,
+                                        onChanged: (v) {
+                                          setState(() => _envHopSize = v);
+                                          _envDetector?.hopSeconds = v;
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    width: 40,
+                                    child: Text(
+                                      '${_envHopSize.toStringAsFixed(1)}s',
+                                      textAlign: TextAlign.right,
+                                      style: const TextStyle(
+                                          color: Color(0xFFD4AF37), fontSize: 11),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+
                       // Environment Mode Toggle
                       const Text(
                         'ENVIRONMENT MODE',
@@ -941,6 +1205,11 @@ class _AmplificationScreenState extends State<AmplificationScreen>
                           fontWeight: FontWeight.bold,
                         ),
                       ),
+                      if (_envDetectEnabled)
+                        const Text(
+                          'Controlled automatically by detector',
+                          style: TextStyle(color: Color(0xFFD4AF37), fontSize: 10),
+                        ),
                       const SizedBox(height: 8),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -961,7 +1230,7 @@ class _AmplificationScreenState extends State<AmplificationScreen>
                               DropdownMenuItem(value: 1, child: Text('Transit Mode')),
                               DropdownMenuItem(value: 2, child: Text('Conversation Mode')),
                             ],
-                            onChanged: (value) {
+                            onChanged: _envDetectEnabled ? null : (value) {
                               if (value != null) _onEnvironmentModeChanged(value);
                             },
                           ),
