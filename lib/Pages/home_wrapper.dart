@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'home_screen.dart';
 import 'amplification_screen.dart';
+import 'environment_screen.dart';
 
 import '../models/profile.dart';
 
@@ -18,10 +19,7 @@ class _HomeWrapperState extends State<HomeWrapper> {
 
   late final List<Widget> _screens = [
     HomeScreen(profile: widget.profile),
-    // Placeholder for other screens you might add later (e.g. Plan, Stats, More)
-    const Center(
-      child: Text('PLAN', style: TextStyle(letterSpacing: 1, fontSize: 18)),
-    ),
+    const EnvironmentScreen(),
     const Center(
       child: Text('STATS', style: TextStyle(letterSpacing: 1, fontSize: 18)),
     ),
@@ -85,9 +83,9 @@ class _HomeWrapperState extends State<HomeWrapper> {
                     label: 'HOME',
                   ),
                   BottomNavigationBarItem(
-                    icon: _buildIcon(Icons.calendar_month_outlined, 1),
-                    activeIcon: _buildActiveIcon(Icons.calendar_month, 1),
-                    label: 'PLAN',
+                    icon: _buildIcon(Icons.radar_outlined, 1),
+                    activeIcon: _buildActiveIcon(Icons.radar, 1),
+                    label: 'DETECT',
                   ),
                   BottomNavigationBarItem(
                     icon: _buildIcon(Icons.bar_chart_outlined, 2),
