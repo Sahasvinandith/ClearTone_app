@@ -22,6 +22,20 @@ static inline float clampf(float x, float lo, float hi) {
 static inline float db_to_lin(float db)  { return std::pow(10.0f, db / 20.0f); }
 static inline float lin_to_db(float lin) { return 20.0f * std::log10(std::max(lin, 1e-12f)); }
 
+static constexpr float kClinicalInterceptDb = 15.70f;
+static constexpr float kClinicalSlope = 0.866f;
+static constexpr float kClinicalTargetDb = 10.0f;
+static constexpr float kMaxMakeupGainDb = 25.0f;
+
+static inline float appThresholdToClinicalDb(float appDb) {
+    return kClinicalInterceptDb + kClinicalSlope * appDb;
+}
+
+static inline float appThresholdToMakeupGainDb(float appDb) {
+    float clinicalDb = appThresholdToClinicalDb(appDb);
+    return clampf(clinicalDb - kClinicalTargetDb, 0.f, kMaxMakeupGainDb);
+}
+
 // ---- Fast math for DSP hot path -------------------------------------------
 // Replace std::log10/std::pow with bit-trick log2/exp2 (~10x faster).
 
@@ -390,10 +404,11 @@ public:
         }
     }
 
-    // loss6 values are hearing-loss dB (0-60 typical)
+    // loss6 values are in-app threshold dB. Convert to clinical dB, then add
+    // only the gain needed to bring the clinical threshold down to 10 dB.
     void updateLoss(const float loss6[kBands]) {
         for (int i = 0; i < kBands; i++) {
-            float g = clampf(0.5f * loss6[i], 0.f, 25.f);
+            float g = appThresholdToMakeupGainDb(loss6[i]);
             makeupLin[i] = db_to_lin(g);
         }
     }
@@ -644,7 +659,7 @@ int32_t process_audio_file_ffi(
     Crossover6 xo; xo.init(fs, edges);
 
     float makeupDb[6];
-    for (int i=0;i<6;i++) makeupDb[i]=clampf(0.5f*loss6[i],0.f,25.f);
+    for (int i=0;i<6;i++) makeupDb[i]=appThresholdToMakeupGainDb(loss6[i]);
 
     Compressor comp[6];
     for (int i=0;i<6;i++) {

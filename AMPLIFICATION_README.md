@@ -8,7 +8,7 @@ The ClearTone app provides a multiband hearing‑loss amplification system imple
   - **Crossover (`ParallelCrossover6`)** splits audio into six frequency bands using state‑variable filters.
   - **`Compressor`** per band applies threshold, ratio, attack/release, and gain reduction.
   - **`SoftLimiter`** prevents clipping on the mixed output.
-  - **Make‑up gain** (`makeupLin`) is calculated from a loss profile (`loss6`).
+  - **Make‑up gain** (`makeupLin`) is calculated from in-app hearing test thresholds (`loss6`).
 - **`OboeEngine`** – Manages Oboe audio streams (input & output) and calls `RealtimeProcessor` for each sample.
 - **FFI Bindings (`audio_engine_ffi.dart`)** – Exposes native functions to Dart:
   - `startRtStream`, `stopRtStream`, `updateRtParams`, `debug*` helpers, etc.
@@ -16,7 +16,7 @@ The ClearTone app provides a multiband hearing‑loss amplification system imple
 ## Data Flow
 1. **Stream Initialization** – `OboeEngine::start` opens output then input streams, negotiates sample rate, and calls `processor.init(sampleRate)`.
 2. **Audio Callback** – `onAudioReady` receives input frames, splits each sample into six bands, processes each band with its compressor, applies make‑up gain, mixes wet/dry, limits, and writes to output stream.
-3. **Loss Profile Update** – `updateLoss(const float loss6[6])` converts loss values (0‑1) to dB make‑up gain using `clampf` and `db_to_lin`.
+3. **Loss Profile Update** – `updateLoss(const float loss6[6])` converts in-app threshold dB to clinical dB using `clinical = 15.70 + 0.866 * app`, then applies only the gain above the 10 dB clinical target: `clamp(clinical - 10, 0, 25)`.
 4. **FFI Interaction** – Dart code allocates native buffers, calls `process_audio_file_ffi` (batch processing) or real‑time functions via the exported symbols.
 
 ## Key Parameters
@@ -25,7 +25,7 @@ The ClearTone app provides a multiband hearing‑loss amplification system imple
 | `thresholdDb` | Compressor threshold per band | `{-18,-22,-26,-30,-34,-36}` dB |
 | `ratio` | Compression ratio | `4.0` |
 | `attackMs` / `releaseMs` | Time constants | `20 ms` / `250 ms` |
-| `makeupLin` | Per‑band make‑up gain derived from loss profile | `1.0` (no loss) |
+| `makeupLin` | Per‑band make‑up gain derived from calibrated in-app thresholds | `1.0` (no loss) |
 | `wet` / `dry` | Mix of processed vs original signal | `wet=1.0`, `dry=0.0` |
 | `masterLin` | Global output gain | `1.0` |
 
@@ -33,7 +33,7 @@ The ClearTone app provides a multiband hearing‑loss amplification system imple
 ```dart
 final engine = AudioEngineFFI();
 await engine.startRtStream(deviceId);
-engine.updateRtParams([0.2, 0.4, 0.6, 0.8, 1.0, 0.5]); // example loss profile
+engine.updateRtParams([0, 10, 20, 30, 40, 50]); // example in-app dB thresholds
 // ... capture/debug helpers available
 engine.stopRtStream();
 ```
