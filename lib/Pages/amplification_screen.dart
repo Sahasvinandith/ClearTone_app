@@ -54,6 +54,8 @@ class _AmplificationScreenState extends State<AmplificationScreen>
   StreamSubscription<EnvironmentResult>? _envSub;
   String _detectedEnvironment = '';
   double _detectedConfidence = 0.0;
+  Timer? _conversationHoldTimer;
+  int? _pendingMode; // mode waiting to apply after conversation hold expires
 
   // Real-time sliders
   final List<int> _rtBands = [
@@ -100,6 +102,7 @@ class _AmplificationScreenState extends State<AmplificationScreen>
       _audioEngine.stopRtStream();
     }
     _envSub?.cancel();
+    _conversationHoldTimer?.cancel();
     _envDetector?.stop().then((_) => _envDetector?.dispose());
     _tabController.dispose();
     _audioRecorder.dispose();
@@ -117,6 +120,9 @@ class _AmplificationScreenState extends State<AmplificationScreen>
       if (mounted) setState(() => _envDetectEnabled = true);
     } else {
       _envSub?.cancel();
+      _conversationHoldTimer?.cancel();
+      _conversationHoldTimer = null;
+      _pendingMode = null;
       await _envDetector?.stop();
       _envDetector?.dispose();
       _envDetector = null;
@@ -128,6 +134,18 @@ class _AmplificationScreenState extends State<AmplificationScreen>
           _detectedConfidence = 0.0;
         });
       }
+    }
+  }
+
+  void _applyMode(int mode) {
+    if (!mounted) return;
+    setState(() {
+      _environmentMode = mode;
+      _expanderEnabled = true;
+    });
+    if (_isRtStreaming) {
+      _audioEngine.setEnvironmentMode(mode);
+      if (mode == 2) _audioEngine.setExpanderEnabled(true);
     }
   }
 
@@ -147,7 +165,7 @@ class _AmplificationScreenState extends State<AmplificationScreen>
         newMode = 1;
         break;
       default:
-        // 'Initializing' - don't change mode yet
+        // 'Initializing' — update display only, don't touch the mode
         setState(() {
           _detectedEnvironment = result.mode;
           _detectedConfidence = result.confidence;
@@ -158,17 +176,31 @@ class _AmplificationScreenState extends State<AmplificationScreen>
     setState(() {
       _detectedEnvironment = result.mode;
       _detectedConfidence = result.confidence;
-      if (newMode != _environmentMode) {
-        _environmentMode = newMode;
-        _expanderEnabled = true;
-        if (_isRtStreaming) {
-          _audioEngine.setEnvironmentMode(newMode);
-          if (newMode == 2) {
-            _audioEngine.setExpanderEnabled(true);
-          }
-        }
-      }
     });
+
+    if (newMode == 2) {
+      // Conversation detected: apply immediately and cancel any pending exit
+      _conversationHoldTimer?.cancel();
+      _conversationHoldTimer = null;
+      _pendingMode = null;
+      if (newMode != _environmentMode) _applyMode(newMode);
+    } else if (_environmentMode == 2) {
+      // Leaving conversation: hold for 2 s before switching
+      _pendingMode = newMode;
+      _conversationHoldTimer ??= Timer(const Duration(seconds: 4), () {
+        _conversationHoldTimer = null;
+        if (mounted && _envDetectEnabled && _pendingMode != null) {
+          _applyMode(_pendingMode!);
+          _pendingMode = null;
+        }
+      });
+    } else {
+      // Neither entering nor leaving conversation: switch immediately
+      _conversationHoldTimer?.cancel();
+      _conversationHoldTimer = null;
+      _pendingMode = null;
+      if (newMode != _environmentMode) _applyMode(newMode);
+    }
   }
 
   void _startReconnectTimer() {
