@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'home_screen.dart';
 import 'amplification_screen.dart';
 import 'environment_screen.dart';
+import 'stt_tts_screen.dart';
 
 import '../models/profile.dart';
 
@@ -20,9 +21,7 @@ class _HomeWrapperState extends State<HomeWrapper> {
   late final List<Widget> _screens = [
     HomeScreen(profile: widget.profile),
     const EnvironmentScreen(),
-    const Center(
-      child: Text('STATS', style: TextStyle(letterSpacing: 1, fontSize: 18)),
-    ),
+    const SttTtsScreen(),
     AmplificationScreen(profile: widget.profile),
   ];
 
@@ -88,9 +87,9 @@ class _HomeWrapperState extends State<HomeWrapper> {
                     label: 'DETECT',
                   ),
                   BottomNavigationBarItem(
-                    icon: _buildIcon(Icons.bar_chart_outlined, 2),
-                    activeIcon: _buildActiveIcon(Icons.bar_chart, 2),
-                    label: 'STATS',
+                    icon: _buildIcon(Icons.closed_caption_outlined, 2),
+                    activeIcon: _buildActiveIcon(Icons.closed_caption, 2),
+                    label: 'ASSIST',
                   ),
                   BottomNavigationBarItem(
                     icon: _buildIcon(Icons.hearing_outlined, 3),
