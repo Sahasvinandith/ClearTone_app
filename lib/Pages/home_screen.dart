@@ -1,48 +1,33 @@
 import 'package:flutter/material.dart';
-import 'package:fl_chart/fl_chart.dart';
-import '../models/profile.dart';
-import 'results_screen.dart';
-import '../profile_storage.dart';
-import 'screen_test.dart';
+
+import '../amplification_status.dart';
 import '../audio_generator.dart';
-import 'profile_selection_screen.dart';
+import '../models/profile.dart';
+import 'screen_test.dart';
 
 class HomeScreen extends StatefulWidget {
   final Profile profile;
+  final VoidCallback onOpenTools;
+  final VoidCallback onOpenAmplification;
 
-  const HomeScreen({super.key, required this.profile});
+  const HomeScreen({
+    super.key,
+    required this.profile,
+    required this.onOpenTools,
+    required this.onOpenAmplification,
+  });
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final ProfileStorage _profileStorage = ProfileStorage();
   final AudioGenerator _audioGenerator = AudioGenerator();
-  List<Profile> _profiles = [];
-
-  late Profile _activeProfile;
-  int _selectedChartTab = 2; // 0=Left, 1=Right, 2=All
 
   @override
   void dispose() {
     _audioGenerator.stopTone();
     super.dispose();
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _activeProfile = widget.profile;
-    _loadProfiles();
-  }
-
-  Future<void> _loadProfiles() async {
-    final profiles = await _profileStorage.loadProfiles();
-    if (!mounted) return;
-    setState(() {
-      _profiles = profiles;
-    });
   }
 
   void _showTestModeSheet() {
@@ -83,36 +68,34 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 20),
               _TestModeCard(
                 title: 'STANDARD TEST',
-                subtitle: 'Requires 3 consecutive detections\nto confirm each threshold',
+                subtitle:
+                    'Requires 3 consecutive detections to confirm each threshold',
                 onTap: () {
                   Navigator.pop(ctx);
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => ScreenTest(
-                        profile: _activeProfile,
-                        requiredHits: 3,
-                      ),
+                      builder: (_) =>
+                          ScreenTest(profile: widget.profile, requiredHits: 3),
                     ),
-                  ).then((_) => _loadProfiles());
+                  ).then((_) => setState(() {}));
                 },
               ),
               const SizedBox(height: 12),
               _TestModeCard(
                 title: 'ADVANCED TEST',
-                subtitle: 'Requires 2 consecutive detections\nto confirm each threshold — faster',
+                subtitle:
+                    'Requires 2 consecutive detections to confirm each threshold',
                 isAdvanced: true,
                 onTap: () {
                   Navigator.pop(ctx);
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => ScreenTest(
-                        profile: _activeProfile,
-                        requiredHits: 2,
-                      ),
+                      builder: (_) =>
+                          ScreenTest(profile: widget.profile, requiredHits: 2),
                     ),
-                  ).then((_) => _loadProfiles());
+                  ).then((_) => setState(() {}));
                 },
               ),
             ],
@@ -120,361 +103,6 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       },
     );
-  }
-
-  // Removed _addProfile and _showAddProfileDialog and _navigateToTest
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
-        child: _profiles.isEmpty ? _buildEmptyState() : _buildDashboard(),
-      ),
-    );
-  }
-
-  Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 28),
-            child: Text(
-              'NO PROFILES YET.\nCREATE ONE TO START.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 1,
-                color: Color(0xFF666666),
-              ),
-            ),
-          ),
-          const SizedBox(height: 32),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pushAndRemoveUntil(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const ProfileSelectionScreen(),
-                ),
-                (route) => false,
-              );
-            },
-            child: const Text('SWITCH PROFILES'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDashboard() {
-    return SingleChildScrollView(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 28.0, vertical: 32.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'HELLO ! ${_activeProfile.name.toUpperCase()}',
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.5,
-                    color: const Color(0xFFD4AF37), // Gold accent
-                  ),
-                ),
-                _buildProfileSelector(),
-              ],
-            ),
-            const SizedBox(height: 32),
-            if (_activeProfile.testResult != null) ...[
-              const Text(
-                'YOUR LATEST RESULTS',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 2,
-                  color: Color(0xFFA0A0A0),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(24),
-                decoration: const BoxDecoration(color: Color(0xFF1C1C1C)),
-                child: Column(
-                  children: [
-                    _buildMiniChartTabs(),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      height: 120, // Mini chart height
-                      child: _buildMiniChart(),
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'PREVIEW',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w500,
-                        letterSpacing: 1.5,
-                        color: Color(0xFF666666),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ] else ...[
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(32),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1C1C1C),
-                  border: Border.all(color: const Color(0xFF2A2A2A)),
-                ),
-                child: const Column(
-                  children: [
-                    Icon(
-                      Icons.monitor_heart_outlined,
-                      size: 32,
-                      color: Color(0xFF666666),
-                    ),
-                    SizedBox(height: 14),
-                    Text(
-                      'NO TEST RESULTS YET',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 1,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-            const SizedBox(height: 32),
-            _buildActionButtons(),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildProfileSelector() {
-    return PopupMenuButton<dynamic>(
-      icon: const Icon(Icons.person, color: Colors.white),
-      color: const Color(0xFF1C1C1C),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-      onSelected: (dynamic value) {
-        if (value is String && value == 'ADD_NEW') {
-          Navigator.pushAndRemoveUntil(
-            context,
-            MaterialPageRoute(
-              builder: (context) => const ProfileSelectionScreen(),
-            ),
-            (route) => false,
-          );
-        } else if (value is Profile) {
-          setState(() {
-            _activeProfile = value;
-          });
-        }
-      },
-      itemBuilder: (BuildContext context) {
-        List<PopupMenuEntry<dynamic>> items = _profiles.map((Profile profile) {
-          return PopupMenuItem<dynamic>(
-            value: profile,
-            child: Text(
-              profile.name.toUpperCase(),
-              style: TextStyle(
-                color: _activeProfile.name == profile.name
-                    ? const Color(0xFFD4AF37)
-                    : Colors.white,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 1.5,
-              ),
-            ),
-          );
-        }).toList();
-
-        items.add(const PopupMenuDivider(height: 1));
-        items.add(
-          const PopupMenuItem<dynamic>(
-            value: 'ADD_NEW',
-            child: Text(
-              'SWITCH PROFILES',
-              style: TextStyle(
-                color: Color(0xFF666666),
-                fontWeight: FontWeight.w600,
-                letterSpacing: 1,
-              ),
-            ),
-          ),
-        );
-        return items;
-      },
-    );
-  }
-
-  Widget _buildActionButtons() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        ElevatedButton(
-          onPressed: _showSoundCheckDialog,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.white,
-            foregroundColor: Colors.black,
-          ),
-          child: const Text('CHECK EARBUDS'),
-        ),
-        const SizedBox(height: 16),
-        ElevatedButton(
-          onPressed: () => _showTestModeSheet(),
-          child: const Text('START TEST'),
-        ),
-        const SizedBox(height: 16),
-        if (_activeProfile.testResult != null)
-          ElevatedButton(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => ResultsScreen(profile: _activeProfile),
-                ),
-              ).then((_) => _loadProfiles());
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF282828),
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('CHECK MY EAR PROFILE'),
-          ),
-        const SizedBox(height: 16),
-        TextButton(
-          onPressed: () {
-            Navigator.pushAndRemoveUntil(
-              context,
-              MaterialPageRoute(
-                builder: (context) => const ProfileSelectionScreen(),
-              ),
-              (route) => false,
-            );
-          },
-          style: TextButton.styleFrom(foregroundColor: const Color(0xFF666666)),
-          child: const Text('SWITCH PROFILE'),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildMiniChartTabs() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        _buildMiniTab(0, 'LEFT'),
-        const Text(' | ', style: TextStyle(color: Color(0xFF666666))),
-        _buildMiniTab(1, 'RIGHT'),
-        const Text(' | ', style: TextStyle(color: Color(0xFF666666))),
-        _buildMiniTab(2, 'ALL'),
-      ],
-    );
-  }
-
-  Widget _buildMiniTab(int index, String label) {
-    final isSelected = _selectedChartTab == index;
-    return GestureDetector(
-      onTap: () {
-        setState(() {
-          _selectedChartTab = index;
-        });
-      },
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 13,
-          fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
-          letterSpacing: 1,
-          color: isSelected ? const Color(0xFFD4AF37) : const Color(0xFF666666),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMiniChart() {
-    final result = _activeProfile.testResult;
-    if (result == null) return const SizedBox();
-
-    return LineChart(
-      LineChartData(
-        gridData: const FlGridData(show: false),
-        titlesData: const FlTitlesData(show: false),
-        borderData: FlBorderData(show: false),
-        lineTouchData: const LineTouchData(enabled: false),
-        minY: 120, // Start y-axis
-        maxY: -10, // Max DB (inverted)
-        lineBarsData: _buildMiniChartLines(result),
-      ),
-    );
-  }
-
-  List<LineChartBarData> _buildMiniChartLines(dynamic result) {
-    List<LineChartBarData> lineBars = [];
-    final frequencies = [250, 500, 1000, 2000, 4000, 8000];
-
-    // Left Ear
-    if (_selectedChartTab == 0 || _selectedChartTab == 2) {
-      final leftSpots = frequencies.map((freq) {
-        final val =
-            result.leftEarResults[freq] ?? 120; // Default to bottom if missing
-        return FlSpot(freq.toDouble(), val.toDouble());
-      }).toList();
-
-      lineBars.add(
-        LineChartBarData(
-          spots: leftSpots,
-          isCurved: false,
-          color: const Color(0xFFD4AF37), // Gold
-          barWidth: 2,
-          isStrokeCapRound: false,
-          dotData: const FlDotData(show: true),
-          belowBarData: BarAreaData(
-            show: true,
-            color: const Color(0xFFD4AF37).withValues(alpha: 0.1),
-          ),
-        ),
-      );
-    }
-
-    // Right Ear
-    if (_selectedChartTab == 1 || _selectedChartTab == 2) {
-      final rightSpots = frequencies.map((freq) {
-        final val =
-            result.rightEarResults[freq] ?? 120; // Default to bottom if missing
-        return FlSpot(freq.toDouble(), val.toDouble());
-      }).toList();
-
-      lineBars.add(
-        LineChartBarData(
-          spots: rightSpots,
-          isCurved: false,
-          color: Colors.white, // White for right ear contrast
-          barWidth: 2,
-          isStrokeCapRound: false,
-          dotData: const FlDotData(show: true),
-          belowBarData: BarAreaData(
-            show: true,
-            color: Colors.white.withValues(alpha: 0.05),
-          ),
-        ),
-      );
-    }
-
-    return lineBars;
   }
 
   void _showSoundCheckDialog() {
@@ -482,16 +110,16 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text(
-          "CHECK YOUR EARBUDS",
+          'CHECK YOUR EARBUDS',
           style: TextStyle(letterSpacing: 1),
         ),
         content: const Text(
-          "Make sure you can hear the sound in the correct ear.",
+          'Make sure you can hear the sound in the correct ear.',
           style: TextStyle(color: Colors.white70),
         ),
         actions: [
           TextButton(
-            child: const Text("CHECK LEFT EAR"),
+            child: const Text('CHECK LEFT EAR'),
             onPressed: () => _audioGenerator.playTone(
               frequency: 1000,
               amplitude: 40,
@@ -500,7 +128,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           TextButton(
-            child: const Text("CHECK RIGHT EAR"),
+            child: const Text('CHECK RIGHT EAR'),
             onPressed: () => _audioGenerator.playTone(
               frequency: 1000,
               amplitude: 40,
@@ -509,8 +137,241 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           TextButton(
-            child: const Text("DONE"),
+            child: const Text('DONE'),
             onPressed: () => Navigator.of(context).pop(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(24, 28, 24, 28),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'HELLO, ${widget.profile.name.toUpperCase()}',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.2,
+                ),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Your hearing tools are ready.',
+                style: TextStyle(color: Color(0xFF888888), fontSize: 14),
+              ),
+              const SizedBox(height: 28),
+              _buildAmplificationPanel(),
+              const SizedBox(height: 20),
+              _buildToolsButton(),
+              const SizedBox(height: 20),
+              _buildTestActions(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAmplificationPanel() {
+    return ValueListenableBuilder<AmplificationStatus>(
+      valueListenable: amplificationStatusNotifier,
+      builder: (context, status, _) {
+        return Container(
+          padding: const EdgeInsets.all(22),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1C1C1C),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: const Color(0xFF2A2A2A)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 46,
+                    height: 46,
+                    decoration: BoxDecoration(
+                      color: status.modeColor.withValues(alpha: 0.16),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Icon(Icons.hearing, color: status.modeColor),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'AMPLIFICATION',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 1.2,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          status.isStreaming
+                              ? 'Live audio is active'
+                              : 'Start real-time amplification',
+                          style: const TextStyle(
+                            color: Color(0xFF8F8F8F),
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF252525),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 12,
+                      height: 12,
+                      decoration: BoxDecoration(
+                        color: status.modeColor,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        '${status.modeLabel} mode',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      status.isEnvironmentDetectionEnabled ? 'AUTO' : 'MANUAL',
+                      style: TextStyle(
+                        color: status.isEnvironmentDetectionEnabled
+                            ? const Color(0xFFD4AF37)
+                            : const Color(0xFF777777),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (status.detectedEnvironment.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Text(
+                  'Detected ${status.detectedEnvironment} '
+                  '(${(status.confidence * 100).toStringAsFixed(0)}%)',
+                  style: const TextStyle(
+                    color: Color(0xFF888888),
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 22),
+              ElevatedButton.icon(
+                onPressed: widget.onOpenAmplification,
+                icon: Icon(
+                  status.isStreaming ? Icons.tune : Icons.power_settings_new,
+                ),
+                label: Text(
+                  status.isStreaming
+                      ? 'MANAGE AMPLIFICATION'
+                      : 'START AMPLIFICATION',
+                ),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: widget.onOpenAmplification,
+                icon: const Icon(Icons.radar),
+                label: Text(
+                  status.isEnvironmentDetectionEnabled
+                      ? 'LIVE ENV DETECTION ENABLED'
+                      : 'ENABLE LIVE ENV DETECTION',
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: status.isEnvironmentDetectionEnabled
+                      ? const Color(0xFFD4AF37)
+                      : Colors.white,
+                  side: BorderSide(
+                    color: status.isEnvironmentDetectionEnabled
+                        ? const Color(0xFFD4AF37)
+                        : const Color(0xFF3A3A3A),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildToolsButton() {
+    return OutlinedButton.icon(
+      onPressed: widget.onOpenTools,
+      icon: const Icon(Icons.build),
+      label: const Text('TOOLS'),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: Colors.white,
+        side: const BorderSide(color: Color(0xFF3A3A3A)),
+        padding: const EdgeInsets.symmetric(vertical: 18),
+      ),
+    );
+  }
+
+  Widget _buildTestActions() {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: const Color(0xFF171717),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF242424)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            'HEARING TEST',
+            style: TextStyle(
+              color: Color(0xFFA0A0A0),
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.4,
+            ),
+          ),
+          const SizedBox(height: 14),
+          ElevatedButton(
+            onPressed: _showTestModeSheet,
+            child: Text(
+              widget.profile.testResults.isEmpty
+                  ? 'START TEST'
+                  : 'TRY ANOTHER TEST',
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextButton(
+            onPressed: _showSoundCheckDialog,
+            child: const Text('CHECK EARBUDS'),
           ),
         ],
       ),

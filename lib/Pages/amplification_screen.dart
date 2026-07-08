@@ -9,6 +9,7 @@ import 'dart:async';
 import '../models/profile.dart';
 import '../audio_engine_ffi.dart';
 import '../services/environment_detector.dart';
+import '../amplification_status.dart';
 
 class AmplificationScreen extends StatefulWidget {
   final Profile profile;
@@ -135,7 +136,10 @@ class _AmplificationScreenState extends State<AmplificationScreen>
       _envDetector!.hopSeconds = _envHopSize;
       _envSub = _envDetector!.results.listen(_onEnvResult);
       await _envDetector!.start();
-      if (mounted) setState(() => _envDetectEnabled = true);
+      if (mounted) {
+        setState(() => _envDetectEnabled = true);
+        _publishAmplificationStatus();
+      }
     } else {
       _envSub?.cancel();
       _conversationHoldTimer?.cancel();
@@ -153,8 +157,19 @@ class _AmplificationScreenState extends State<AmplificationScreen>
           _detectedRms = 0.0;
           _detectedRawProb = 0.0;
         });
+        _publishAmplificationStatus();
       }
     }
+  }
+
+  void _publishAmplificationStatus() {
+    amplificationStatusNotifier.value = AmplificationStatus(
+      isStreaming: _isRtStreaming,
+      isEnvironmentDetectionEnabled: _envDetectEnabled,
+      mode: _environmentMode,
+      detectedEnvironment: _detectedEnvironment,
+      confidence: _detectedConfidence,
+    );
   }
 
   void _applyMode(int mode) {
@@ -167,6 +182,7 @@ class _AmplificationScreenState extends State<AmplificationScreen>
       _audioEngine.setEnvironmentMode(mode);
       if (mode == 2) _audioEngine.setExpanderEnabled(true);
     }
+    _publishAmplificationStatus();
   }
 
   void _onEnvResult(EnvironmentResult result) {
@@ -192,6 +208,7 @@ class _AmplificationScreenState extends State<AmplificationScreen>
           _detectedRms = result.rms;
           _detectedRawProb = result.rawProb;
         });
+        _publishAmplificationStatus();
         return;
     }
 
@@ -201,6 +218,7 @@ class _AmplificationScreenState extends State<AmplificationScreen>
       _detectedRms = result.rms;
       _detectedRawProb = result.rawProb;
     });
+    _publishAmplificationStatus();
 
     if (newMode == 2) {
       // Conversation detected: apply immediately and cancel any pending exit
@@ -350,6 +368,7 @@ class _AmplificationScreenState extends State<AmplificationScreen>
       setState(() {
         _isRtStreaming = false;
       });
+      _publishAmplificationStatus();
     } else {
       if (_selectedDeviceId == null) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -398,6 +417,7 @@ class _AmplificationScreenState extends State<AmplificationScreen>
         setState(() {
           _isRtStreaming = true;
         });
+        _publishAmplificationStatus();
       } else {
         // ... (rest of error handling)
         ScaffoldMessenger.of(context).showSnackBar(
@@ -426,6 +446,7 @@ class _AmplificationScreenState extends State<AmplificationScreen>
       _expanderEnabled = true; // reset to default when switching modes
     });
     _audioEngine.setEnvironmentMode(mode);
+    _publishAmplificationStatus();
   }
 
   void _onSilenceThresholdTextChanged(String value) {

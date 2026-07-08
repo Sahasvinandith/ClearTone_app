@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'home_screen.dart';
 import 'amplification_screen.dart';
-import 'environment_screen.dart';
+import 'profile_tab_screen.dart';
 import 'stt_tts_screen.dart';
 
 import '../models/profile.dart';
@@ -18,11 +18,21 @@ class HomeWrapper extends StatefulWidget {
 class _HomeWrapperState extends State<HomeWrapper> {
   int _currentIndex = 0;
 
+  void _openTab(int index) {
+    setState(() {
+      _currentIndex = index;
+    });
+  }
+
   late final List<Widget> _screens = [
-    HomeScreen(profile: widget.profile),
-    const EnvironmentScreen(),
+    HomeScreen(
+      profile: widget.profile,
+      onOpenTools: () => _openTab(1),
+      onOpenAmplification: () => _openTab(2),
+    ),
     const SttTtsScreen(),
     AmplificationScreen(profile: widget.profile),
+    ProfileTabScreen(profile: widget.profile),
   ];
 
   @override
@@ -82,19 +92,19 @@ class _HomeWrapperState extends State<HomeWrapper> {
                     label: 'HOME',
                   ),
                   BottomNavigationBarItem(
-                    icon: _buildIcon(Icons.radar_outlined, 1),
-                    activeIcon: _buildActiveIcon(Icons.radar, 1),
-                    label: 'DETECT',
+                    icon: _buildIcon(Icons.build_outlined, 1),
+                    activeIcon: _buildActiveIcon(Icons.build, 1),
+                    label: 'TOOLS',
                   ),
                   BottomNavigationBarItem(
-                    icon: _buildIcon(Icons.closed_caption_outlined, 2),
-                    activeIcon: _buildActiveIcon(Icons.closed_caption, 2),
-                    label: 'ASSIST',
-                  ),
-                  BottomNavigationBarItem(
-                    icon: _buildIcon(Icons.hearing_outlined, 3),
-                    activeIcon: _buildActiveIcon(Icons.hearing, 3),
+                    icon: _buildIcon(Icons.hearing_outlined, 2),
+                    activeIcon: _buildActiveIcon(Icons.hearing, 2),
                     label: 'AMPLIFY',
+                  ),
+                  BottomNavigationBarItem(
+                    icon: _buildIcon(Icons.person_outline, 3),
+                    activeIcon: _buildActiveIcon(Icons.person, 3),
+                    label: 'PROFILE',
                   ),
                 ],
               ),
