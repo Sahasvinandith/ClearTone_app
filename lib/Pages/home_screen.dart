@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../amplification_status.dart';
-import '../audio_generator.dart';
 import '../models/profile.dart';
-import 'screen_test.dart';
 
-class HomeScreen extends StatefulWidget {
+class HomeScreen extends StatelessWidget {
   final Profile profile;
   final VoidCallback onOpenTools;
   final VoidCallback onOpenAmplification;
@@ -18,360 +16,310 @@ class HomeScreen extends StatefulWidget {
   });
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
-}
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxHeight < 640;
+            final padding = compact ? 16.0 : 22.0;
+            final gap = compact ? 10.0 : 16.0;
 
-class _HomeScreenState extends State<HomeScreen> {
-  final AudioGenerator _audioGenerator = AudioGenerator();
-
-  @override
-  void dispose() {
-    _audioGenerator.stopTone();
-    super.dispose();
-  }
-
-  void _showTestModeSheet() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF1C1C1C),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (ctx) {
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(24, 20, 24, 40),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.white24,
-                    borderRadius: BorderRadius.circular(2),
+            return Padding(
+              padding: EdgeInsets.fromLTRB(padding, padding, padding, 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _Header(name: profile.name, compact: compact),
+                  SizedBox(height: gap),
+                  Expanded(
+                    child: _AmplificationTile(
+                      compact: compact,
+                      onOpenAmplification: onOpenAmplification,
+                    ),
                   ),
-                ),
+                  SizedBox(height: gap),
+                  _ToolsTile(onTap: onOpenTools, compact: compact),
+                ],
               ),
-              const SizedBox(height: 20),
-              const Text(
-                'SELECT TEST MODE',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 2,
-                  color: Colors.white54,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 20),
-              _TestModeCard(
-                title: 'STANDARD TEST',
-                subtitle:
-                    'Requires 3 consecutive detections to confirm each threshold',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          ScreenTest(profile: widget.profile, requiredHits: 3),
-                    ),
-                  ).then((_) => setState(() {}));
-                },
-              ),
-              const SizedBox(height: 12),
-              _TestModeCard(
-                title: 'ADVANCED TEST',
-                subtitle:
-                    'Requires 2 consecutive detections to confirm each threshold',
-                isAdvanced: true,
-                onTap: () {
-                  Navigator.pop(ctx);
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          ScreenTest(profile: widget.profile, requiredHits: 2),
-                    ),
-                  ).then((_) => setState(() {}));
-                },
-              ),
-            ],
-          ),
-        );
-      },
+            );
+          },
+        ),
+      ),
     );
   }
+}
 
-  void _showSoundCheckDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text(
-          'CHECK YOUR EARBUDS',
-          style: TextStyle(letterSpacing: 1),
-        ),
-        content: const Text(
-          'Make sure you can hear the sound in the correct ear.',
-          style: TextStyle(color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            child: const Text('CHECK LEFT EAR'),
-            onPressed: () => _audioGenerator.playTone(
-              frequency: 1000,
-              amplitude: 40,
-              channel: 'left',
-              duration: 1000,
+class _Header extends StatelessWidget {
+  final String name;
+  final bool compact;
+
+  const _Header({required this.name, required this.compact});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: compact ? 52 : 68,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'HI, ${name.toUpperCase()}',
+              maxLines: 1,
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1.1,
+                fontSize: compact ? 22 : 26,
+              ),
             ),
           ),
-          TextButton(
-            child: const Text('CHECK RIGHT EAR'),
-            onPressed: () => _audioGenerator.playTone(
-              frequency: 1000,
-              amplitude: 40,
-              channel: 'right',
-              duration: 1000,
+          if (!compact) ...[
+            const SizedBox(height: 4),
+            const Text(
+              'Amplification controls are ready.',
+              style: TextStyle(color: Color(0xFF8A8A8A), fontSize: 13),
             ),
-          ),
-          TextButton(
-            child: const Text('DONE'),
-            onPressed: () => Navigator.of(context).pop(),
-          ),
+          ],
         ],
       ),
     );
   }
+}
+
+class _AmplificationTile extends StatelessWidget {
+  final bool compact;
+  final VoidCallback onOpenAmplification;
+
+  const _AmplificationTile({
+    required this.compact,
+    required this.onOpenAmplification,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(24, 28, 24, 28),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'HELLO, ${widget.profile.name.toUpperCase()}',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 1.2,
-                ),
-              ),
-              const SizedBox(height: 6),
-              const Text(
-                'Your hearing tools are ready.',
-                style: TextStyle(color: Color(0xFF888888), fontSize: 14),
-              ),
-              const SizedBox(height: 28),
-              _buildAmplificationPanel(),
-              const SizedBox(height: 20),
-              _buildToolsButton(),
-              const SizedBox(height: 20),
-              _buildTestActions(),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAmplificationPanel() {
     return ValueListenableBuilder<AmplificationStatus>(
       valueListenable: amplificationStatusNotifier,
       builder: (context, status, _) {
         return Container(
-          padding: const EdgeInsets.all(22),
+          padding: EdgeInsets.all(compact ? 14 : 18),
           decoration: BoxDecoration(
             color: const Color(0xFF1C1C1C),
             borderRadius: BorderRadius.circular(18),
             border: Border.all(color: const Color(0xFF2A2A2A)),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final tight = constraints.maxHeight < 360;
+              final sectionGap = tight ? 8.0 : 14.0;
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Container(
-                    width: 46,
-                    height: 46,
-                    decoration: BoxDecoration(
-                      color: status.modeColor.withValues(alpha: 0.16),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Icon(Icons.hearing, color: status.modeColor),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'AMPLIFICATION',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 1.2,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          status.isStreaming
-                              ? 'Live audio is active'
-                              : 'Start real-time amplification',
-                          style: const TextStyle(
-                            color: Color(0xFF8F8F8F),
-                            fontSize: 13,
-                          ),
-                        ),
-                      ],
+                  _AmplificationSummary(status: status, compact: tight),
+                  SizedBox(height: sectionGap),
+                  _PrimaryActions(status: status, compact: tight),
+                  SizedBox(height: sectionGap),
+                  _ModePicker(status: status, compact: tight),
+                  SizedBox(height: sectionGap),
+                  _DetectionReadout(status: status, compact: tight),
+                  const Spacer(),
+                  TextButton.icon(
+                    onPressed: onOpenAmplification,
+                    icon: const Icon(Icons.tune, size: 18),
+                    label: const Text('ADVANCED CONTROLS'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: const Color(0xFF9D9D9D),
+                      padding: EdgeInsets.symmetric(vertical: tight ? 8 : 12),
                     ),
                   ),
                 ],
-              ),
-              const SizedBox(height: 24),
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF252525),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 12,
-                      height: 12,
-                      decoration: BoxDecoration(
-                        color: status.modeColor,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        '${status.modeLabel} mode',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    Text(
-                      status.isEnvironmentDetectionEnabled ? 'AUTO' : 'MANUAL',
-                      style: TextStyle(
-                        color: status.isEnvironmentDetectionEnabled
-                            ? const Color(0xFFD4AF37)
-                            : const Color(0xFF777777),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 1,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (status.detectedEnvironment.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                Text(
-                  'Detected ${status.detectedEnvironment} '
-                  '(${(status.confidence * 100).toStringAsFixed(0)}%)',
-                  style: const TextStyle(
-                    color: Color(0xFF888888),
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-              const SizedBox(height: 22),
-              ElevatedButton.icon(
-                onPressed: widget.onOpenAmplification,
-                icon: Icon(
-                  status.isStreaming ? Icons.tune : Icons.power_settings_new,
-                ),
-                label: Text(
-                  status.isStreaming
-                      ? 'MANAGE AMPLIFICATION'
-                      : 'START AMPLIFICATION',
-                ),
-              ),
-              const SizedBox(height: 12),
-              OutlinedButton.icon(
-                onPressed: widget.onOpenAmplification,
-                icon: const Icon(Icons.radar),
-                label: Text(
-                  status.isEnvironmentDetectionEnabled
-                      ? 'LIVE ENV DETECTION ENABLED'
-                      : 'ENABLE LIVE ENV DETECTION',
-                ),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: status.isEnvironmentDetectionEnabled
-                      ? const Color(0xFFD4AF37)
-                      : Colors.white,
-                  side: BorderSide(
-                    color: status.isEnvironmentDetectionEnabled
-                        ? const Color(0xFFD4AF37)
-                        : const Color(0xFF3A3A3A),
-                  ),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                ),
-              ),
-            ],
+              );
+            },
           ),
         );
       },
     );
   }
+}
 
-  Widget _buildToolsButton() {
-    return OutlinedButton.icon(
-      onPressed: widget.onOpenTools,
-      icon: const Icon(Icons.build),
-      label: const Text('TOOLS'),
-      style: OutlinedButton.styleFrom(
-        foregroundColor: Colors.white,
-        side: const BorderSide(color: Color(0xFF3A3A3A)),
-        padding: const EdgeInsets.symmetric(vertical: 18),
-      ),
+class _AmplificationSummary extends StatelessWidget {
+  final AmplificationStatus status;
+  final bool compact;
+
+  const _AmplificationSummary({required this.status, required this.compact});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: compact ? 40 : 50,
+          height: compact ? 40 : 50,
+          decoration: BoxDecoration(
+            color: status.modeColor.withValues(alpha: 0.16),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Icon(
+            status.isStreaming ? Icons.hearing : Icons.hearing_outlined,
+            color: status.modeColor,
+            size: compact ? 22 : 28,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                status.isStreaming
+                    ? 'AMPLIFICATION ACTIVE'
+                    : 'AMPLIFICATION READY',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: compact ? 13 : 16,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                '${status.modeLabel} mode',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: status.modeColor,
+                  fontSize: compact ? 12 : 14,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+        _StatusPill(
+          label: status.isControllerReady ? 'READY' : 'LOADING',
+          color: status.isControllerReady
+              ? const Color(0xFF55D18A)
+              : const Color(0xFFFFA24A),
+          compact: compact,
+        ),
+      ],
     );
   }
+}
 
-  Widget _buildTestActions() {
+class _PrimaryActions extends StatelessWidget {
+  final AmplificationStatus status;
+  final bool compact;
+
+  const _PrimaryActions({required this.status, required this.compact});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: ElevatedButton.icon(
+            onPressed: status.isControllerReady
+                ? () =>
+                      amplificationController.setStreaming(!status.isStreaming)
+                : null,
+            icon: Icon(
+              status.isStreaming
+                  ? Icons.stop_circle_outlined
+                  : Icons.power_settings_new,
+              size: 19,
+            ),
+            label: Text(status.isStreaming ? 'STOP' : 'START'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: status.isStreaming
+                  ? const Color(0xFFE65B5B)
+                  : const Color(0xFFD4AF37),
+              foregroundColor: const Color(0xFF111111),
+              padding: EdgeInsets.symmetric(vertical: compact ? 11 : 15),
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: status.isControllerReady && status.isStreaming
+                ? () => amplificationController.setEnvironmentDetection(
+                    !status.isEnvironmentDetectionEnabled,
+                  )
+                : null,
+            icon: Icon(
+              status.isEnvironmentDetectionEnabled
+                  ? Icons.radar
+                  : Icons.radar_outlined,
+              size: 19,
+            ),
+            label: Text(
+              status.isEnvironmentDetectionEnabled ? 'AUTO ON' : 'AUTO MODE',
+            ),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: status.isEnvironmentDetectionEnabled
+                  ? const Color(0xFFD4AF37)
+                  : Colors.white,
+              disabledForegroundColor: const Color(0xFF555555),
+              side: BorderSide(
+                color: status.isEnvironmentDetectionEnabled
+                    ? const Color(0xFFD4AF37)
+                    : const Color(0xFF3A3A3A),
+              ),
+              padding: EdgeInsets.symmetric(vertical: compact ? 11 : 15),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ModePicker extends StatelessWidget {
+  final AmplificationStatus status;
+  final bool compact;
+
+  const _ModePicker({required this.status, required this.compact});
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: EdgeInsets.all(compact ? 8 : 10),
       decoration: BoxDecoration(
-        color: const Color(0xFF171717),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF242424)),
+        color: const Color(0xFF242424),
+        borderRadius: BorderRadius.circular(14),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      child: Row(
         children: [
-          const Text(
-            'HEARING TEST',
-            style: TextStyle(
-              color: Color(0xFFA0A0A0),
-              fontSize: 12,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 1.4,
-            ),
+          _ModeButton(
+            label: 'Standard',
+            color: const Color(0xFF6CA8FF),
+            mode: 0,
+            status: status,
+            compact: compact,
           ),
-          const SizedBox(height: 14),
-          ElevatedButton(
-            onPressed: _showTestModeSheet,
-            child: Text(
-              widget.profile.testResults.isEmpty
-                  ? 'START TEST'
-                  : 'TRY ANOTHER TEST',
-            ),
+          const SizedBox(width: 8),
+          _ModeButton(
+            label: 'Transport',
+            color: const Color(0xFFFFA24A),
+            mode: 1,
+            status: status,
+            compact: compact,
           ),
-          const SizedBox(height: 12),
-          TextButton(
-            onPressed: _showSoundCheckDialog,
-            child: const Text('CHECK EARBUDS'),
+          const SizedBox(width: 8),
+          _ModeButton(
+            label: 'Talk',
+            color: const Color(0xFF55D18A),
+            mode: 2,
+            status: status,
+            compact: compact,
           ),
         ],
       ),
@@ -379,62 +327,242 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-class _TestModeCard extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final VoidCallback onTap;
-  final bool isAdvanced;
+class _ModeButton extends StatelessWidget {
+  final String label;
+  final Color color;
+  final int mode;
+  final AmplificationStatus status;
+  final bool compact;
 
-  const _TestModeCard({
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
-    this.isAdvanced = false,
+  const _ModeButton({
+    required this.label,
+    required this.color,
+    required this.mode,
+    required this.status,
+    required this.compact,
   });
 
   @override
   Widget build(BuildContext context) {
-    final Color accent = isAdvanced ? const Color(0xFFD4AF37) : Colors.white70;
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
-        decoration: BoxDecoration(
-          border: Border.all(color: accent.withValues(alpha: 0.4), width: 1.5),
-          borderRadius: BorderRadius.circular(12),
-          color: isAdvanced
-              ? const Color(0xFFD4AF37).withValues(alpha: 0.07)
-              : Colors.white.withValues(alpha: 0.04),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 1.2,
-                      color: accent,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Colors.white54,
-                      height: 1.5,
-                    ),
-                  ),
-                ],
-              ),
+    final selected = status.mode == mode;
+    final enabled =
+        status.isControllerReady && !status.isEnvironmentDetectionEnabled;
+
+    return Expanded(
+      child: InkWell(
+        onTap: enabled
+            ? () => amplificationController.setEnvironmentMode(mode)
+            : null,
+        borderRadius: BorderRadius.circular(10),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: EdgeInsets.symmetric(vertical: compact ? 8 : 11),
+          decoration: BoxDecoration(
+            color: selected ? color.withValues(alpha: 0.2) : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: selected ? color : const Color(0xFF343434),
             ),
-            Icon(Icons.chevron_right, color: accent.withValues(alpha: 0.6)),
-          ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: enabled || selected ? color : const Color(0xFF555555),
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(height: 5),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  style: TextStyle(
+                    color: enabled || selected
+                        ? Colors.white
+                        : const Color(0xFF666666),
+                    fontSize: compact ? 10 : 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DetectionReadout extends StatelessWidget {
+  final AmplificationStatus status;
+  final bool compact;
+
+  const _DetectionReadout({required this.status, required this.compact});
+
+  @override
+  Widget build(BuildContext context) {
+    final subtitle = status.isEnvironmentDetectionEnabled
+        ? (status.detectedEnvironment.isEmpty
+              ? 'Listening for environment changes'
+              : '${status.detectedEnvironment} '
+                    '${(status.confidence * 100).toStringAsFixed(0)}%')
+        : 'Manual mode selection';
+
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 12 : 14,
+        vertical: compact ? 10 : 13,
+      ),
+      decoration: BoxDecoration(
+        color: const Color(0xFF242424),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: status.modeColor.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            status.isEnvironmentDetectionEnabled
+                ? Icons.graphic_eq
+                : Icons.touch_app_outlined,
+            color: status.modeColor,
+            size: compact ? 18 : 22,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  status.isEnvironmentDetectionEnabled
+                      ? 'LIVE ENV DETECTION'
+                      : 'MANUAL MODE',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: compact ? 11 : 13,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: const Color(0xFF9A9A9A),
+                    fontSize: compact ? 10 : 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ToolsTile extends StatelessWidget {
+  final VoidCallback onTap;
+  final bool compact;
+
+  const _ToolsTile({required this.onTap, required this.compact});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: compact ? 70 : 84,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: EdgeInsets.symmetric(horizontal: compact ? 14 : 18),
+          decoration: BoxDecoration(
+            color: const Color(0xFF171717),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFF2A2A2A)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: compact ? 38 : 46,
+                height: compact ? 38 : 46,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFD4AF37).withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                child: const Icon(Icons.build, color: Color(0xFFD4AF37)),
+              ),
+              const SizedBox(width: 14),
+              const Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'TOOLS',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                    SizedBox(height: 3),
+                    Text(
+                      'STT, TTS and future utilities',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: Color(0xFF888888), fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right, color: Color(0xFF777777)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StatusPill extends StatelessWidget {
+  final String label;
+  final Color color;
+  final bool compact;
+
+  const _StatusPill({
+    required this.label,
+    required this.color,
+    required this.compact,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 8 : 10,
+        vertical: compact ? 5 : 6,
+      ),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.45)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: compact ? 9 : 10,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.7,
         ),
       ),
     );

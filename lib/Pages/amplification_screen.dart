@@ -101,10 +101,17 @@ class _AmplificationScreenState extends State<AmplificationScreen>
     );
     _initRtGainFromProfile();
     _startReconnectTimer();
+    amplificationController.register(
+      setStreaming: _setRtStreaming,
+      setEnvironmentDetection: _toggleEnvDetection,
+      setEnvironmentMode: _onEnvironmentModeChanged,
+    );
+    _publishAmplificationStatus();
   }
 
   @override
   void dispose() {
+    amplificationController.unregister();
     _reconnectTimer?.cancel();
     if (_isRtStreaming) {
       _audioEngine.stopRtStream();
@@ -169,6 +176,7 @@ class _AmplificationScreenState extends State<AmplificationScreen>
       mode: _environmentMode,
       detectedEnvironment: _detectedEnvironment,
       confidence: _detectedConfidence,
+      isControllerReady: amplificationController.isReady,
     );
   }
 
@@ -343,7 +351,12 @@ class _AmplificationScreenState extends State<AmplificationScreen>
     }
   }
 
-  void _toggleRtStream() async {
+  Future<void> _setRtStreaming(bool enabled) async {
+    if (_isRtStreaming == enabled) return;
+    await _toggleRtStream();
+  }
+
+  Future<void> _toggleRtStream() async {
     if (_isRtStreaming) {
       _audioEngine.stopRtStream();
       if (_envDetectEnabled) {

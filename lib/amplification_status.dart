@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 
+typedef AmplificationBoolCommand = Future<void> Function(bool enabled);
+typedef AmplificationModeCommand = void Function(int mode);
+
 class AmplificationStatus {
   final bool isStreaming;
   final bool isEnvironmentDetectionEnabled;
   final int mode;
   final String detectedEnvironment;
   final double confidence;
+  final bool isControllerReady;
 
   const AmplificationStatus({
     this.isStreaming = false,
@@ -13,6 +17,7 @@ class AmplificationStatus {
     this.mode = 0,
     this.detectedEnvironment = '',
     this.confidence = 0,
+    this.isControllerReady = false,
   });
 
   AmplificationStatus copyWith({
@@ -21,6 +26,7 @@ class AmplificationStatus {
     int? mode,
     String? detectedEnvironment,
     double? confidence,
+    bool? isControllerReady,
   }) {
     return AmplificationStatus(
       isStreaming: isStreaming ?? this.isStreaming,
@@ -29,6 +35,7 @@ class AmplificationStatus {
       mode: mode ?? this.mode,
       detectedEnvironment: detectedEnvironment ?? this.detectedEnvironment,
       confidence: confidence ?? this.confidence,
+      isControllerReady: isControllerReady ?? this.isControllerReady,
     );
   }
 
@@ -57,3 +64,49 @@ class AmplificationStatus {
 
 final ValueNotifier<AmplificationStatus> amplificationStatusNotifier =
     ValueNotifier<AmplificationStatus>(const AmplificationStatus());
+
+class AmplificationController {
+  AmplificationBoolCommand? _setStreaming;
+  AmplificationBoolCommand? _setEnvironmentDetection;
+  AmplificationModeCommand? _setEnvironmentMode;
+
+  bool get isReady =>
+      _setStreaming != null &&
+      _setEnvironmentDetection != null &&
+      _setEnvironmentMode != null;
+
+  void register({
+    required AmplificationBoolCommand setStreaming,
+    required AmplificationBoolCommand setEnvironmentDetection,
+    required AmplificationModeCommand setEnvironmentMode,
+  }) {
+    _setStreaming = setStreaming;
+    _setEnvironmentDetection = setEnvironmentDetection;
+    _setEnvironmentMode = setEnvironmentMode;
+    amplificationStatusNotifier.value = amplificationStatusNotifier.value
+        .copyWith(isControllerReady: true);
+  }
+
+  void unregister() {
+    _setStreaming = null;
+    _setEnvironmentDetection = null;
+    _setEnvironmentMode = null;
+    amplificationStatusNotifier.value = amplificationStatusNotifier.value
+        .copyWith(isControllerReady: false);
+  }
+
+  Future<void> setStreaming(bool enabled) async {
+    await _setStreaming?.call(enabled);
+  }
+
+  Future<void> setEnvironmentDetection(bool enabled) async {
+    await _setEnvironmentDetection?.call(enabled);
+  }
+
+  void setEnvironmentMode(int mode) {
+    _setEnvironmentMode?.call(mode);
+  }
+}
+
+final AmplificationController amplificationController =
+    AmplificationController();

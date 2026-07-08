@@ -38,7 +38,7 @@ class _HomeWrapperState extends State<HomeWrapper> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: _screens[_currentIndex],
+      body: IndexedStack(index: _currentIndex, children: _screens),
       // iOS Pill style TabBar container at the bottom
       bottomNavigationBar: Container(
         padding: const EdgeInsets.fromLTRB(
