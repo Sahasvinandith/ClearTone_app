@@ -15,7 +15,7 @@ migrate_working_dir/
 # Modification Knowledge Bases
 env_detect/
 sst_integrate/
-
+context/
 
 # IntelliJ related
 *.iml

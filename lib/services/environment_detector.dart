@@ -2,8 +2,9 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
-import 'package:record/record.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
+
+import '../audio_engine_ffi.dart';
 
 // ---------------------------------------------------------------------------
 // Data contract
@@ -85,9 +86,14 @@ class EnvironmentDetectorService {
   bool _running = false;
   bool get isRunning => _running;
 
+  final AudioEngineFFI _audioEngine = AudioEngineFFI();
   Interpreter? _interpreter;
-  AudioRecorder? _recorder;
-  StreamSubscription<Uint8List>? _pcmSub;
+  Timer? _audioPollTimer;
+  final Float32List _nativeDrainBuf = Float32List(8192);
+  int _sourceSampleRate = 0;
+  double _sourceStep = 1.0;
+  double _sourcePosition = 0.0;
+  double? _previousSourceSample;
 
   /// Circular sample buffer: always holds the latest _windowSamples floats.
   late Float32List _sampleBuf;
@@ -105,7 +111,7 @@ class EnvironmentDetectorService {
   late Float64List _fftReal;
   late Float64List _fftImag;
   late Float32List _powerSpectrum; // length = _nFft / 2 + 1 = 1025
-  late Float64List _hannWindow;    // length = _nFft
+  late Float64List _hannWindow; // length = _nFft
   late List<List<double>> _melFilterbank; // [_nMels][1025]
 
   // ---------------------------------------------------------------------------
@@ -133,40 +139,23 @@ class EnvironmentDetectorService {
       'assets/models/cnn_model_v2.tflite',
     );
 
-    // NOTE: EnvironmentDetectorService uses the `record` package (Android
-    // AudioRecord) independently from the Oboe real-time stream. Both can
-    // acquire the microphone simultaneously only if the device / Android version
-    // supports concurrent capture (requires API 29+ and ALLOW_CAPTURE_BY_ALL
-    // policy). On older devices they will compete; whichever grabs the mic last
-    // wins, which may silence the other. If both are active at the same time
-    // expect degraded or muted audio on one stream.
-    _recorder = AudioRecorder();
-    final pcmStream = await _recorder!.startStream(
-      const RecordConfig(
-        encoder: AudioEncoder.pcm16bits,
-        sampleRate: _sampleRate,
-        numChannels: 1,
-      ),
+    _syncSourceSampleRate();
+    _audioPollTimer = Timer.periodic(
+      const Duration(milliseconds: 20),
+      (_) => _pollNativeAudio(),
     );
-
-    _pcmSub = pcmStream.listen(
-      _onPcmChunk,
-      onError: (Object e) {
-        debugPrint('[EnvDetect] PCM stream error: $e');
-      },
-    );
+    _pollNativeAudio();
   }
 
   Future<void> stop() async {
     if (!_running) return;
     _running = false;
 
-    await _pcmSub?.cancel();
-    _pcmSub = null;
-
-    await _recorder?.stop();
-    await _recorder?.dispose();
-    _recorder = null;
+    _audioPollTimer?.cancel();
+    _audioPollTimer = null;
+    _sourceSampleRate = 0;
+    _sourcePosition = 0.0;
+    _previousSourceSample = null;
 
     // Close the interpreter to free TFLite model memory.
     _interpreter?.close();
@@ -184,36 +173,101 @@ class EnvironmentDetectorService {
   // PCM ingestion
   // ---------------------------------------------------------------------------
 
-  void _onPcmChunk(Uint8List bytes) {
+  void _pollNativeAudio() {
     if (!_running) return;
 
-    final int sampleCount = bytes.lengthInBytes ~/ 2;
-    if (sampleCount == 0) return;
-    final ByteData bd = bytes.buffer.asByteData(bytes.offsetInBytes);
+    if (!_syncSourceSampleRate()) return;
 
+    for (int i = 0; i < 4; i++) {
+      final int frames = _audioEngine.drainRtInputFrames(_nativeDrainBuf);
+      if (frames <= 0) break;
+      _ingestNativeFrames(_nativeDrainBuf, frames);
+      if (frames < _nativeDrainBuf.length) break;
+    }
+  }
+
+  bool _syncSourceSampleRate() {
+    final int sampleRate = _audioEngine.getRtInputSampleRate();
+    if (sampleRate <= 0) {
+      _sourceSampleRate = 0;
+      _sourcePosition = 0.0;
+      _previousSourceSample = null;
+      return false;
+    }
+    if (sampleRate == _sourceSampleRate) return true;
+
+    _sourceSampleRate = sampleRate;
+    _sourceStep = sampleRate / _sampleRate;
+    _sourcePosition = 0.0;
+    _previousSourceSample = null;
+    return true;
+  }
+
+  void _ingestNativeFrames(Float32List samples, int sampleCount) {
+    if (sampleCount <= 0) return;
+
+    if (_sourceSampleRate == _sampleRate) {
+      _onFloatSamples(samples, sampleCount);
+      return;
+    }
+
+    final int prefix = _previousSourceSample == null ? 0 : 1;
+    final int totalInputSamples = sampleCount + prefix;
+    final int outputCapacity =
+        (sampleCount * _sampleRate / _sourceSampleRate).ceil() + 4;
+    final Float32List resampled = Float32List(outputCapacity);
+    int outputCount = 0;
+    double position = _sourcePosition;
+
+    double sampleAt(int index) {
+      if (prefix == 1) {
+        return index == 0 ? _previousSourceSample! : samples[index - 1];
+      }
+      return samples[index];
+    }
+
+    while (position < totalInputSamples - 1 && outputCount < resampled.length) {
+      final int index = position.floor();
+      final double frac = position - index;
+      final double a = sampleAt(index);
+      final double b = sampleAt(index + 1);
+      resampled[outputCount++] = (a + (b - a) * frac).toFloat32();
+      position += _sourceStep;
+    }
+
+    _previousSourceSample = samples[sampleCount - 1];
+    _sourcePosition = position - (totalInputSamples - 1);
+
+    if (outputCount > 0) {
+      _onFloatSamples(resampled, outputCount);
+    }
+  }
+
+  void _onFloatSamples(Float32List samples, int sampleCount) {
     if (_sampleCount < _windowSamples) {
       // Fill phase: buffer is not yet full. Append as many samples as fit,
       // then hand the remainder to the batch-shift path.
       final int canFit = _windowSamples - _sampleCount;
       final int fillCount = math.min(sampleCount, canFit);
-      for (int i = 0; i < fillCount; i++) {
-        final int raw = bd.getInt16(i * 2, Endian.little);
-        _sampleBuf[_sampleCount++] = raw / 32768.0;
-      }
+      _sampleBuf.setRange(_sampleCount, _sampleCount + fillCount, samples);
+      _sampleCount += fillCount;
       _newSamplesSinceInference += fillCount;
 
       if (sampleCount > fillCount) {
         // Buffer just became full mid-chunk; process the remaining samples.
-        final Uint8List remainder = bytes.sublist(fillCount * 2);
-        _onPcmChunk(remainder);
+        _ingestChunkIntoBuffer(samples, sampleCount - fillCount, fillCount);
+        _runPendingInference();
         return;
       }
     } else {
       // Steady state: buffer is full. Batch-shift + append.
-      _ingestChunkIntoBuffer(bytes, sampleCount, bd);
-      _newSamplesSinceInference += sampleCount;
+      _ingestChunkIntoBuffer(samples, sampleCount, 0);
     }
 
+    _runPendingInference();
+  }
+
+  void _runPendingInference() {
     // Trigger inference once a full hop (1 s = 22050 samples) has arrived.
     while (_newSamplesSinceInference >= _hopSamples &&
         _sampleCount >= _windowSamples) {
@@ -223,28 +277,28 @@ class EnvironmentDetectorService {
   }
 
   /// Efficient batch ingestion: shift the existing buffer left by `n` positions
-  /// and append the `n` new float32 samples from `bd`.
-  void _ingestChunkIntoBuffer(Uint8List bytes, int n, ByteData bd) {
+  /// and append the `n` new float32 samples from [samples] starting at [offset].
+  void _ingestChunkIntoBuffer(Float32List samples, int n, int offset) {
     // Clamp to at most a full window shift (discard older data beyond window).
     final int shift = math.min(n, _windowSamples);
+    final int start = offset + n - shift;
 
     if (shift >= _windowSamples) {
       // Entire window replaced by the most recent _windowSamples samples
       // from this chunk (take the tail of the chunk).
-      final int startIdx = n - _windowSamples;
-      for (int i = 0; i < _windowSamples; i++) {
-        final int raw = bd.getInt16((startIdx + i) * 2, Endian.little);
-        _sampleBuf[i] = raw / 32768.0;
-      }
+      _sampleBuf.setRange(0, _windowSamples, samples, start);
     } else {
       // Shift existing data left.
       _sampleBuf.setRange(0, _windowSamples - shift, _sampleBuf, shift);
       // Append new data at the tail.
-      for (int i = 0; i < shift; i++) {
-        final int raw = bd.getInt16(i * 2, Endian.little);
-        _sampleBuf[_windowSamples - shift + i] = raw / 32768.0;
-      }
+      _sampleBuf.setRange(
+        _windowSamples - shift,
+        _windowSamples,
+        samples,
+        start,
+      );
     }
+    _newSamplesSinceInference += n;
   }
 
   // ---------------------------------------------------------------------------
@@ -255,12 +309,14 @@ class EnvironmentDetectorService {
     // 1. Silence check.
     final double rms = _computeRms(_sampleBuf, 0, _windowSamples);
     if (rms < silenceThreshold) {
-      _resultCtrl.add(EnvironmentResult(
-        mode: 'Silence',
-        confidence: 0.0,
-        rawProb: 0.0,
-        rms: rms,
-      ));
+      _resultCtrl.add(
+        EnvironmentResult(
+          mode: 'Silence',
+          confidence: 0.0,
+          rawProb: 0.0,
+          rms: rms,
+        ),
+      );
       return;
     }
 
@@ -281,7 +337,9 @@ class EnvironmentDetectorService {
       ),
     );
 
-    final List<List<double>> output = [[0.0]];
+    final List<List<double>> output = [
+      [0.0],
+    ];
 
     try {
       _interpreter!.run(input, output);
@@ -336,12 +394,14 @@ class EnvironmentDetectorService {
       }
     }
 
-    _resultCtrl.add(EnvironmentResult(
-      mode: mode,
-      confidence: confidence.clamp(0.0, 1.0),
-      rawProb: rawProb,
-      rms: rms,
-    ));
+    _resultCtrl.add(
+      EnvironmentResult(
+        mode: mode,
+        confidence: confidence.clamp(0.0, 1.0),
+        rawProb: rawProb,
+        rms: rms,
+      ),
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -365,13 +425,13 @@ class EnvironmentDetectorService {
   /// flat Float32List of length _nMels * _expectedFrames (row-major: mel-first).
   Float32List _computeMelSpectrogram(Float32List samples) {
     // frames = floor((N - nFft) / hopLength) + 1 = 169 for our constants.
-    final int rawFrames =
-        ((_windowSamples - _nFft) ~/ _hopLength) + 1; // 169
+    final int rawFrames = ((_windowSamples - _nFft) ~/ _hopLength) + 1; // 169
 
     // Output array: [_nMels x _expectedFrames], initialised to 0.0 so
     // padding (frames 169-172) is handled automatically.
-    final Float32List melSpec =
-        Float32List(_nMels * _expectedFrames); // zero-initialised
+    final Float32List melSpec = Float32List(
+      _nMels * _expectedFrames,
+    ); // zero-initialised
 
     for (int frame = 0; frame < rawFrames; frame++) {
       final int start = frame * _hopLength;
@@ -387,9 +447,8 @@ class EnvironmentDetectorService {
 
       // Power spectrum (one-sided, length 1025).
       for (int k = 0; k <= _nFft ~/ 2; k++) {
-        _powerSpectrum[k] = (_fftReal[k] * _fftReal[k] +
-                _fftImag[k] * _fftImag[k])
-            .toFloat32();
+        _powerSpectrum[k] =
+            (_fftReal[k] * _fftReal[k] + _fftImag[k] * _fftImag[k]).toFloat32();
       }
 
       // Apply mel filterbank: [_nMels] dot products over power spectrum.
@@ -471,11 +530,17 @@ class EnvironmentDetectorService {
     // Convert mel points back to Hz, then to FFT bin indices.
     final List<double> hzPoints = melPoints.map(_melToHz).toList();
     final List<int> binPoints = hzPoints
-        .map((hz) => (hz * (_nFft + 1) / _sampleRate).round().clamp(0, numBins - 1))
+        .map(
+          (hz) =>
+              (hz * (_nFft + 1) / _sampleRate).round().clamp(0, numBins - 1),
+        )
         .toList();
 
     // Build triangular filters.
-    final List<List<double>> fb = List.generate(_nMels, (_) => List.filled(numBins, 0.0));
+    final List<List<double>> fb = List.generate(
+      _nMels,
+      (_) => List.filled(numBins, 0.0),
+    );
 
     for (int m = 0; m < _nMels; m++) {
       final int lo = binPoints[m];
@@ -502,8 +567,10 @@ class EnvironmentDetectorService {
     return fb;
   }
 
-  static double _hzToMel(double hz) => 2595.0 * math.log(1.0 + hz / 700.0) / math.ln10;
-  static double _melToHz(double mel) => 700.0 * (math.pow(10.0, mel / 2595.0) - 1.0);
+  static double _hzToMel(double hz) =>
+      2595.0 * math.log(1.0 + hz / 700.0) / math.ln10;
+  static double _melToHz(double mel) =>
+      700.0 * (math.pow(10.0, mel / 2595.0) - 1.0);
 
   // ---------------------------------------------------------------------------
   // DSP: Radix-2 Cooley-Tukey in-place FFT
@@ -533,8 +600,12 @@ class EnvironmentDetectorService {
       }
       j ^= bit;
       if (i < j) {
-        double tmp = real[i]; real[i] = real[j]; real[j] = tmp;
-        tmp = imag[i]; imag[i] = imag[j]; imag[j] = tmp;
+        double tmp = real[i];
+        real[i] = real[j];
+        real[j] = tmp;
+        tmp = imag[i];
+        imag[i] = imag[j];
+        imag[j] = tmp;
       }
     }
 
@@ -584,4 +655,3 @@ extension _ToFloat32 on double {
     return this;
   }
 }
-

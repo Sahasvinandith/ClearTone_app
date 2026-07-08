@@ -517,6 +517,15 @@ public:
     std::atomic<bool>   running_{false};
     int32_t             currentDeviceId_ = 0;
     EnvironmentMode     currentMode_ = MODE_STANDARD;
+    std::atomic<int32_t> inputSampleRate_{0};
+
+    // Raw mic frames for environment detection. This is a single-producer
+    // audio-callback / single-consumer FFI drain buffer.
+    std::vector<float>  rawInputRing_;
+    size_t              rawInputRead_ = 0;
+    size_t              rawInputWrite_ = 0;
+    size_t              rawInputCount_ = 0;
+    std::mutex          rawInputMu_;
 
     // debug capture
     std::vector<float>  capIn_, capOut_;
@@ -536,6 +545,8 @@ public:
         }
         if (got < numFrames)
             std::memset(out + got, 0, (numFrames - got) * sizeof(float));
+
+        pushRawInput(out, numFrames);
 
         bool cap = capturing_.load(std::memory_order_relaxed);
         if (cap) {
@@ -586,6 +597,7 @@ public:
             return -1;
         }
         inputStream_->setBufferSizeInFrames(inputStream_->getFramesPerBurst() * 2);
+        configureRawInputBuffer(inputStream_->getSampleRate());
         proc_.init((float)inputStream_->getSampleRate());
 
         oboe::AudioStreamBuilder outB;
@@ -621,6 +633,8 @@ public:
         if (outputStream_) outputStream_->requestStop();
         if (inputStream_)  inputStream_->requestStop();
         running_ = false;
+        inputSampleRate_.store(0, std::memory_order_relaxed);
+        clearRawInput();
         LOGI("Streams stopped.");
         return 0;
     }
@@ -631,6 +645,56 @@ public:
         if (running_) {
             // Restart to apply new InputPreset
             startEngine(currentDeviceId_);
+        }
+    }
+
+    int32_t getInputSampleRate() const {
+        return inputSampleRate_.load(std::memory_order_relaxed);
+    }
+
+    int32_t drainRawInput(float* out, int32_t maxFrames) {
+        if (out == nullptr || maxFrames <= 0) return 0;
+        std::lock_guard<std::mutex> lk(rawInputMu_);
+        const int32_t frames =
+                (int32_t)std::min(rawInputCount_, (size_t)maxFrames);
+        for (int32_t i = 0; i < frames; i++) {
+            out[i] = rawInputRing_[rawInputRead_];
+            rawInputRead_ = (rawInputRead_ + 1) % rawInputRing_.size();
+        }
+        rawInputCount_ -= (size_t)frames;
+        return frames;
+    }
+
+private:
+    void configureRawInputBuffer(int32_t sampleRate) {
+        std::lock_guard<std::mutex> lk(rawInputMu_);
+        inputSampleRate_.store(sampleRate, std::memory_order_relaxed);
+        const size_t capacity = (size_t)std::max(sampleRate * 6, 1);
+        rawInputRing_.assign(capacity, 0.f);
+        rawInputRead_ = 0;
+        rawInputWrite_ = 0;
+        rawInputCount_ = 0;
+    }
+
+    void clearRawInput() {
+        std::lock_guard<std::mutex> lk(rawInputMu_);
+        rawInputRead_ = 0;
+        rawInputWrite_ = 0;
+        rawInputCount_ = 0;
+    }
+
+    void pushRawInput(const float* samples, int32_t numFrames) {
+        if (samples == nullptr || numFrames <= 0) return;
+        std::lock_guard<std::mutex> lk(rawInputMu_);
+        if (rawInputRing_.empty()) return;
+        for (int32_t i = 0; i < numFrames; i++) {
+            rawInputRing_[rawInputWrite_] = samples[i];
+            rawInputWrite_ = (rawInputWrite_ + 1) % rawInputRing_.size();
+            if (rawInputCount_ == rawInputRing_.size()) {
+                rawInputRead_ = (rawInputRead_ + 1) % rawInputRing_.size();
+            } else {
+                rawInputCount_++;
+            }
         }
     }
 };
@@ -702,6 +766,14 @@ int32_t stop_rt_stream_ffi() {
 int32_t update_rt_params_ffi(const float* loss6) {
     gEngine.proc_.updateLoss(loss6);
     return 0;
+}
+
+int32_t get_rt_input_sample_rate_ffi() {
+    return gEngine.getInputSampleRate();
+}
+
+int32_t drain_rt_input_frames_ffi(float* out, int32_t maxFrames) {
+    return gEngine.drainRawInput(out, maxFrames);
 }
 
 void debug_start_capture_ffi() {
