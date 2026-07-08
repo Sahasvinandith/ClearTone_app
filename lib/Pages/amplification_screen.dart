@@ -49,12 +49,15 @@ class _AmplificationScreenState extends State<AmplificationScreen>
 
   // --- Environment Auto-Detection State ---
   bool _envDetectEnabled = false;
-  double _envSilenceThreshold = 0.025;
+  double _envSilenceThreshold = 0.01;
+  late final TextEditingController _envSilenceThresholdController;
   double _envHopSize = 1.0;
   EnvironmentDetectorService? _envDetector;
   StreamSubscription<EnvironmentResult>? _envSub;
   String _detectedEnvironment = '';
   double _detectedConfidence = 0.0;
+  double _detectedRms = 0.0;
+  double _detectedRawProb = 0.0;
   Timer? _conversationHoldTimer;
   int? _pendingMode; // mode waiting to apply after conversation hold expires
 
@@ -92,6 +95,9 @@ class _AmplificationScreenState extends State<AmplificationScreen>
       }
     });
 
+    _envSilenceThresholdController = TextEditingController(
+      text: _envSilenceThreshold.toStringAsFixed(3),
+    );
     _initRtGainFromProfile();
     _startReconnectTimer();
   }
@@ -106,6 +112,7 @@ class _AmplificationScreenState extends State<AmplificationScreen>
     _conversationHoldTimer?.cancel();
     _envDetector?.stop().then((_) => _envDetector?.dispose());
     _tabController.dispose();
+    _envSilenceThresholdController.dispose();
     _audioRecorder.dispose();
     _audioPlayer.dispose();
     super.dispose();
@@ -143,6 +150,8 @@ class _AmplificationScreenState extends State<AmplificationScreen>
           _envDetectEnabled = false;
           _detectedEnvironment = '';
           _detectedConfidence = 0.0;
+          _detectedRms = 0.0;
+          _detectedRawProb = 0.0;
         });
       }
     }
@@ -180,6 +189,8 @@ class _AmplificationScreenState extends State<AmplificationScreen>
         setState(() {
           _detectedEnvironment = result.mode;
           _detectedConfidence = result.confidence;
+          _detectedRms = result.rms;
+          _detectedRawProb = result.rawProb;
         });
         return;
     }
@@ -187,6 +198,8 @@ class _AmplificationScreenState extends State<AmplificationScreen>
     setState(() {
       _detectedEnvironment = result.mode;
       _detectedConfidence = result.confidence;
+      _detectedRms = result.rms;
+      _detectedRawProb = result.rawProb;
     });
 
     if (newMode == 2) {
@@ -413,6 +426,16 @@ class _AmplificationScreenState extends State<AmplificationScreen>
       _expanderEnabled = true; // reset to default when switching modes
     });
     _audioEngine.setEnvironmentMode(mode);
+  }
+
+  void _onSilenceThresholdTextChanged(String value) {
+    final parsed = double.tryParse(value.trim());
+    if (parsed == null || !parsed.isFinite || parsed <= 0) return;
+
+    setState(() {
+      _envSilenceThreshold = parsed;
+    });
+    _envDetector?.silenceThreshold = parsed;
   }
 
   Future<void> _verifyInputFeed() async {
@@ -738,6 +761,37 @@ class _AmplificationScreenState extends State<AmplificationScreen>
   }
 
   // --- UI Builders ---
+
+  Widget _buildEnvMetric(String label, String value) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: Color(0xFF777777),
+            fontSize: 9,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.8,
+          ),
+        ),
+        const SizedBox(height: 4),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            value,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Color(0xFFD4AF37),
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 
   Widget _buildRecordTab() {
     return SingleChildScrollView(
@@ -1217,8 +1271,54 @@ class _AmplificationScreenState extends State<AmplificationScreen>
                                   ],
                                 ],
                               ),
+                              const SizedBox(height: 10),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 10,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF1F1F1F),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(
+                                    color: const Color(0xFF333333),
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: _buildEnvMetric(
+                                        'CONF',
+                                        '${(_detectedConfidence * 100).toStringAsFixed(1)}%',
+                                      ),
+                                    ),
+                                    Container(
+                                      width: 1,
+                                      height: 26,
+                                      color: const Color(0xFF333333),
+                                    ),
+                                    Expanded(
+                                      child: _buildEnvMetric(
+                                        'RMS',
+                                        _detectedRms.toStringAsFixed(5),
+                                      ),
+                                    ),
+                                    Container(
+                                      width: 1,
+                                      height: 26,
+                                      color: const Color(0xFF333333),
+                                    ),
+                                    Expanded(
+                                      child: _buildEnvMetric(
+                                        'P(CONV)',
+                                        _detectedRawProb.toStringAsFixed(3),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                               const SizedBox(height: 12),
-                              // Silence Threshold slider
+                              // Silence Threshold input
                               Row(
                                 children: [
                                   const SizedBox(
@@ -1232,41 +1332,53 @@ class _AmplificationScreenState extends State<AmplificationScreen>
                                     ),
                                   ),
                                   Expanded(
-                                    child: SliderTheme(
-                                      data: SliderThemeData(
-                                        activeTrackColor: const Color(
-                                          0xFFD4AF37,
+                                    child: TextField(
+                                      controller:
+                                          _envSilenceThresholdController,
+                                      keyboardType:
+                                          const TextInputType.numberWithOptions(
+                                            decimal: true,
+                                          ),
+                                      inputFormatters: [
+                                        FilteringTextInputFormatter.allow(
+                                          RegExp(r'[0-9.]'),
                                         ),
-                                        inactiveTrackColor: const Color(
-                                          0xFF444444,
-                                        ),
-                                        thumbColor: const Color(0xFFD4AF37),
-                                        overlayColor: const Color(
-                                          0xFFD4AF37,
-                                        ).withValues(alpha: 0.15),
-                                        trackHeight: 3,
-                                      ),
-                                      child: Slider(
-                                        value: _envSilenceThreshold,
-                                        min: 0.001,
-                                        max: 0.15,
-                                        onChanged: (v) {
-                                          setState(
-                                            () => _envSilenceThreshold = v,
-                                          );
-                                          _envDetector?.silenceThreshold = v;
-                                        },
-                                      ),
-                                    ),
-                                  ),
-                                  SizedBox(
-                                    width: 40,
-                                    child: Text(
-                                      _envSilenceThreshold.toStringAsFixed(3),
-                                      textAlign: TextAlign.right,
+                                      ],
+                                      onChanged: _onSilenceThresholdTextChanged,
                                       style: const TextStyle(
                                         color: Color(0xFFD4AF37),
-                                        fontSize: 11,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                      decoration: InputDecoration(
+                                        isDense: true,
+                                        contentPadding:
+                                            const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 10,
+                                            ),
+                                        filled: true,
+                                        fillColor: const Color(0xFF1F1F1F),
+                                        hintText: '0.010',
+                                        hintStyle: const TextStyle(
+                                          color: Colors.white30,
+                                        ),
+                                        enabledBorder: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                          borderSide: const BorderSide(
+                                            color: Color(0xFF333333),
+                                          ),
+                                        ),
+                                        focusedBorder: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                          borderSide: const BorderSide(
+                                            color: Color(0xFFD4AF37),
+                                          ),
+                                        ),
                                       ),
                                     ),
                                   ),

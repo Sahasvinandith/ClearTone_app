@@ -23,7 +23,7 @@ class _EnvironmentScreenState extends State<EnvironmentScreen>
   bool _isDetecting = false;
 
   // ---- Settings (mirrored locally so sliders update immediately) ----
-  double _silenceThreshold = 0.025;
+  double _silenceThreshold = 0.01;
   double _hopSeconds = 1.0;
   bool _useVoteSmoothing = true;
 

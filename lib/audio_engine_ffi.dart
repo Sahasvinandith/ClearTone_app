@@ -61,6 +61,9 @@ typedef _DrainRtInputFramesC =
 typedef _DrainRtInputFramesDart =
     int Function(Pointer<Float> out, int maxFrames);
 
+typedef _ClearRtInputFramesC = Void Function();
+typedef _ClearRtInputFramesDart = void Function();
+
 typedef _DebugStartCaptureC = Void Function();
 typedef _DebugStartCaptureDart = void Function();
 
@@ -98,6 +101,7 @@ class AudioEngineFFI {
   late final _UpdateRtParamsDart _updateRtParams;
   late final _GetRtInputSampleRateDart _getRtInputSampleRate;
   late final _DrainRtInputFramesDart _drainRtInputFrames;
+  late final _ClearRtInputFramesDart _clearRtInputFrames;
   late final _DebugStartCaptureDart _debugStartCapture;
   late final _DebugStopCaptureDart _debugStopCapture;
   late final _DebugSaveCaptureDart _debugSaveCapture;
@@ -150,6 +154,11 @@ class AudioEngineFFI {
     _drainRtInputFrames = _lib
         .lookupFunction<_DrainRtInputFramesC, _DrainRtInputFramesDart>(
           'drain_rt_input_frames_ffi',
+        );
+
+    _clearRtInputFrames = _lib
+        .lookupFunction<_ClearRtInputFramesC, _ClearRtInputFramesDart>(
+          'clear_rt_input_frames_ffi',
         );
 
     _debugStartCapture = _lib
@@ -287,6 +296,11 @@ class AudioEngineFFI {
 
     target.setRange(0, frames, _inputDrainBuffer.asTypedList(frames));
     return frames;
+  }
+
+  /// Drops pending raw mic frames so a new detector starts from live audio.
+  void clearRtInputFrames() {
+    _clearRtInputFrames();
   }
 
   /// Starts capturing input audio samples for debugging.

@@ -57,7 +57,7 @@ class EnvironmentDetectorService {
   static const int _windowSamples = 88200; // 4 s at 22050 Hz
 
   // ---- Runtime-adjustable parameters ----
-  double silenceThreshold = 0.025;
+  double silenceThreshold = 0.01;
   double hopSeconds = 1.0;
   bool useVoteSmoothing = true;
 
@@ -93,7 +93,9 @@ class EnvironmentDetectorService {
   int _sourceSampleRate = 0;
   double _sourceStep = 1.0;
   double _sourcePosition = 0.0;
-  double? _previousSourceSample;
+  double? _previousFilteredSourceSample;
+  double _lowPassState = 0.0;
+  double _lowPassAlpha = 1.0;
 
   /// Circular sample buffer: always holds the latest _windowSamples floats.
   late Float32List _sampleBuf;
@@ -128,6 +130,7 @@ class EnvironmentDetectorService {
     _sampleBuf = Float32List(_windowSamples);
     _sampleCount = 0;
     _newSamplesSinceInference = 0;
+    _voteBuffer.clear();
     _fftReal = Float64List(_nFft);
     _fftImag = Float64List(_nFft);
     _powerSpectrum = Float32List(_nFft ~/ 2 + 1);
@@ -139,6 +142,7 @@ class EnvironmentDetectorService {
       'assets/models/cnn_model_v2.tflite',
     );
 
+    _audioEngine.clearRtInputFrames();
     _syncSourceSampleRate();
     _audioPollTimer = Timer.periodic(
       const Duration(milliseconds: 20),
@@ -155,7 +159,8 @@ class EnvironmentDetectorService {
     _audioPollTimer = null;
     _sourceSampleRate = 0;
     _sourcePosition = 0.0;
-    _previousSourceSample = null;
+    _previousFilteredSourceSample = null;
+    _lowPassState = 0.0;
 
     // Close the interpreter to free TFLite model memory.
     _interpreter?.close();
@@ -191,7 +196,7 @@ class EnvironmentDetectorService {
     if (sampleRate <= 0) {
       _sourceSampleRate = 0;
       _sourcePosition = 0.0;
-      _previousSourceSample = null;
+      _previousFilteredSourceSample = null;
       return false;
     }
     if (sampleRate == _sourceSampleRate) return true;
@@ -199,7 +204,9 @@ class EnvironmentDetectorService {
     _sourceSampleRate = sampleRate;
     _sourceStep = sampleRate / _sampleRate;
     _sourcePosition = 0.0;
-    _previousSourceSample = null;
+    _previousFilteredSourceSample = null;
+    _lowPassState = 0.0;
+    _lowPassAlpha = _buildLowPassAlpha(sampleRate);
     return true;
   }
 
@@ -211,7 +218,7 @@ class EnvironmentDetectorService {
       return;
     }
 
-    final int prefix = _previousSourceSample == null ? 0 : 1;
+    final int prefix = _previousFilteredSourceSample == null ? 0 : 1;
     final int totalInputSamples = sampleCount + prefix;
     final int outputCapacity =
         (sampleCount * _sampleRate / _sourceSampleRate).ceil() + 4;
@@ -219,28 +226,41 @@ class EnvironmentDetectorService {
     int outputCount = 0;
     double position = _sourcePosition;
 
-    double sampleAt(int index) {
-      if (prefix == 1) {
-        return index == 0 ? _previousSourceSample! : samples[index - 1];
-      }
-      return samples[index];
+    final Float32List filtered = Float32List(totalInputSamples);
+    if (prefix == 1) {
+      filtered[0] = _previousFilteredSourceSample!.toFloat32();
+    }
+    for (int i = 0; i < sampleCount; i++) {
+      final double x = samples[i];
+      _lowPassState += _lowPassAlpha * (x - _lowPassState);
+      filtered[prefix + i] = _lowPassState.toFloat32();
     }
 
     while (position < totalInputSamples - 1 && outputCount < resampled.length) {
       final int index = position.floor();
       final double frac = position - index;
-      final double a = sampleAt(index);
-      final double b = sampleAt(index + 1);
+      final double a = filtered[index];
+      final double b = filtered[index + 1];
       resampled[outputCount++] = (a + (b - a) * frac).toFloat32();
       position += _sourceStep;
     }
 
-    _previousSourceSample = samples[sampleCount - 1];
+    _previousFilteredSourceSample = filtered[totalInputSamples - 1];
     _sourcePosition = position - (totalInputSamples - 1);
 
     if (outputCount > 0) {
       _onFloatSamples(resampled, outputCount);
     }
+  }
+
+  static double _buildLowPassAlpha(int sourceSampleRate) {
+    // The model expects 22050 Hz audio, whose Nyquist is 11025 Hz. A modest
+    // one-pole low-pass before downsampling avoids folding Oboe's 22-24 kHz
+    // source content into the speech band.
+    const double cutoffHz = 10000.0;
+    final double dt = 1.0 / sourceSampleRate;
+    final double rc = 1.0 / (2.0 * math.pi * cutoffHz);
+    return dt / (rc + dt);
   }
 
   void _onFloatSamples(Float32List samples, int sampleCount) {

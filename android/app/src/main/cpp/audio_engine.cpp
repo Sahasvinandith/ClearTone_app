@@ -543,10 +543,13 @@ public:
             auto res = inputStream_->read(out, numFrames, 0 /*timeoutNs*/);
             got = (res) ? res.value() : 0;
         }
+        // Feed environment detection only real input frames. The output path
+        // still pads short reads with silence, but classifier timing should not
+        // be polluted by Oboe startup/read underrun zeros.
+        if (got > 0) pushRawInput(out, got);
+
         if (got < numFrames)
             std::memset(out + got, 0, (numFrames - got) * sizeof(float));
-
-        pushRawInput(out, numFrames);
 
         bool cap = capturing_.load(std::memory_order_relaxed);
         if (cap) {
@@ -665,6 +668,10 @@ public:
         return frames;
     }
 
+    void clearPendingRawInput() {
+        clearRawInput();
+    }
+
 private:
     void configureRawInputBuffer(int32_t sampleRate) {
         std::lock_guard<std::mutex> lk(rawInputMu_);
@@ -774,6 +781,10 @@ int32_t get_rt_input_sample_rate_ffi() {
 
 int32_t drain_rt_input_frames_ffi(float* out, int32_t maxFrames) {
     return gEngine.drainRawInput(out, maxFrames);
+}
+
+void clear_rt_input_frames_ffi() {
+    gEngine.clearPendingRawInput();
 }
 
 void debug_start_capture_ffi() {
