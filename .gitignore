@@ -69,3 +69,6 @@ linux/flutter/generated_plugins.cmake
 
 .claude
 *.raw
+*.md
+*.pptx
+*.pptx#

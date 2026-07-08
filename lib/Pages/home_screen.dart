@@ -32,11 +32,9 @@ class HomeScreen extends StatelessWidget {
                 children: [
                   _Header(name: profile.name, compact: compact),
                   SizedBox(height: gap),
-                  Expanded(
-                    child: _AmplificationTile(
-                      compact: compact,
-                      onOpenAmplification: onOpenAmplification,
-                    ),
+                  _AmplificationTile(
+                    compact: compact,
+                    onOpenAmplification: onOpenAmplification,
                   ),
                   SizedBox(height: gap),
                   _ToolsTile(onTap: onOpenTools, compact: compact),
@@ -125,23 +123,17 @@ class _AmplificationTile extends StatelessWidget {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _AmplificationSummary(status: status, compact: tight),
+                  _AmplificationSummary(
+                    status: status,
+                    compact: tight,
+                    onOpenAmplification: onOpenAmplification,
+                  ),
                   SizedBox(height: sectionGap),
                   _PrimaryActions(status: status, compact: tight),
                   SizedBox(height: sectionGap),
                   _ModePicker(status: status, compact: tight),
                   SizedBox(height: sectionGap),
                   _DetectionReadout(status: status, compact: tight),
-                  SizedBox(height: tight ? 2 : 4),
-                  TextButton.icon(
-                    onPressed: onOpenAmplification,
-                    icon: const Icon(Icons.tune, size: 18),
-                    label: const Text('ADVANCED CONTROLS'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: const Color(0xFF9D9D9D),
-                      padding: EdgeInsets.symmetric(vertical: tight ? 4 : 6),
-                    ),
-                  ),
                 ],
               );
             },
@@ -155,8 +147,13 @@ class _AmplificationTile extends StatelessWidget {
 class _AmplificationSummary extends StatelessWidget {
   final AmplificationStatus status;
   final bool compact;
+  final VoidCallback onOpenAmplification;
 
-  const _AmplificationSummary({required this.status, required this.compact});
+  const _AmplificationSummary({
+    required this.status,
+    required this.compact,
+    required this.onOpenAmplification,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -212,7 +209,47 @@ class _AmplificationSummary extends StatelessWidget {
               : const Color(0xFF55D18A),
           compact: compact,
         ),
+        const SizedBox(width: 8),
+        _AdvancedControlsButton(
+          compact: compact,
+          onPressed: onOpenAmplification,
+        ),
       ],
+    );
+  }
+}
+
+class _AdvancedControlsButton extends StatelessWidget {
+  final bool compact;
+  final VoidCallback onPressed;
+
+  const _AdvancedControlsButton({
+    required this.compact,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'Advanced controls',
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          width: compact ? 36 : 40,
+          height: compact ? 34 : 38,
+          decoration: BoxDecoration(
+            color: const Color(0xFF242424),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFF3A3A3A)),
+          ),
+          child: Icon(
+            Icons.tune,
+            color: const Color(0xFFD4AF37),
+            size: compact ? 18 : 20,
+          ),
+        ),
+      ),
     );
   }
 }
