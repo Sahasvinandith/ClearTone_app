@@ -5,6 +5,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
 import '../speech/exceptions.dart';
+import '../speech/phone_speaker_router.dart';
 import '../speech/speech_config.dart';
 import '../speech/speech_service.dart';
 
@@ -69,7 +70,9 @@ class _SttTtsScreenState extends State<SttTtsScreen> {
     debugPrint('[STT] Calling initialize()...');
     final bool available = await _stt.initialize(
       onError: (error) {
-        debugPrint('[STT] onError — errorMsg: ${error.errorMsg}, permanent: ${error.permanent}');
+        debugPrint(
+          '[STT] onError — errorMsg: ${error.errorMsg}, permanent: ${error.permanent}',
+        );
         if (mounted) setState(() => _isListening = false);
       },
       onStatus: (status) {
@@ -108,16 +111,20 @@ class _SttTtsScreenState extends State<SttTtsScreen> {
     await _tts.setSpeechRate(_speechRate);
     await _tts.setVolume(1.0);
     await _tts.setPitch(1.0);
+    await _tts.setAudioAttributesForNavigation();
     _tts.setStartHandler(() {
       if (mounted) setState(() => _isSpeaking = true);
     });
     _tts.setCompletionHandler(() {
+      PhoneSpeakerRouter.resetAfterTts();
       if (mounted) setState(() => _isSpeaking = false);
     });
     _tts.setCancelHandler(() {
+      PhoneSpeakerRouter.resetAfterTts();
       if (mounted) setState(() => _isSpeaking = false);
     });
     _tts.setErrorHandler((_) {
+      PhoneSpeakerRouter.resetAfterTts();
       if (mounted) setState(() => _isSpeaking = false);
     });
   }
@@ -168,7 +175,9 @@ class _SttTtsScreenState extends State<SttTtsScreen> {
   // ---------------------------------------------------------------------------
 
   Future<void> _toggleOfflineListening() async {
-    debugPrint('[STT] _toggleListening called — _isListening=$_isListening, _sttAvailable=$_sttAvailable');
+    debugPrint(
+      '[STT] _toggleListening called — _isListening=$_isListening, _sttAvailable=$_sttAvailable',
+    );
 
     if (_isListening) {
       await _stt.stop();
@@ -193,7 +202,9 @@ class _SttTtsScreenState extends State<SttTtsScreen> {
 
     await _stt.listen(
       onResult: (result) {
-        debugPrint('[STT] onResult: "${result.recognizedWords}" final=${result.finalResult}');
+        debugPrint(
+          '[STT] onResult: "${result.recognizedWords}" final=${result.finalResult}',
+        );
         if (mounted) setState(() => _transcript = result.recognizedWords);
       },
       listenOptions: SpeechListenOptions(
@@ -264,12 +275,32 @@ class _SttTtsScreenState extends State<SttTtsScreen> {
       _showError('Please enter some text to speak.');
       return;
     }
+    if (PhoneSpeakerRouter.supportsNativeSpeakerTts) {
+      setState(() => _isSpeaking = true);
+      try {
+        await PhoneSpeakerRouter.speakTextOnSpeaker(
+          text: text,
+          localeId: _selectedLocale,
+          speechRate: _speechRate,
+        );
+      } on PlatformException catch (e) {
+        _showError(e.message ?? 'Text-to-speech failed.');
+      } finally {
+        if (mounted) setState(() => _isSpeaking = false);
+      }
+      return;
+    }
+
+    await PhoneSpeakerRouter.enableForTts();
+    await _tts.setAudioAttributesForNavigation();
     await _tts.setSpeechRate(_speechRate);
     await _tts.speak(text);
   }
 
   Future<void> _offlineStop() async {
+    await PhoneSpeakerRouter.stopTextOnSpeaker();
     await _tts.stop();
+    await PhoneSpeakerRouter.resetAfterTts();
     if (mounted) setState(() => _isSpeaking = false);
   }
 
@@ -321,10 +352,7 @@ class _SttTtsScreenState extends State<SttTtsScreen> {
   void _showError(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg),
-        backgroundColor: const Color(0xFF1C1C1C),
-      ),
+      SnackBar(content: Text(msg), backgroundColor: const Color(0xFF1C1C1C)),
     );
   }
 
@@ -385,7 +413,11 @@ class _SttTtsScreenState extends State<SttTtsScreen> {
       ),
       child: Row(
         children: [
-          _buildToggleOption('OFFLINE', !_isOnlineMode, () => _switchMode(false)),
+          _buildToggleOption(
+            'OFFLINE',
+            !_isOnlineMode,
+            () => _switchMode(false),
+          ),
           _buildToggleOption('ONLINE', _isOnlineMode, () => _switchMode(true)),
         ],
       ),
@@ -407,7 +439,9 @@ class _SttTtsScreenState extends State<SttTtsScreen> {
             child: Text(
               label,
               style: TextStyle(
-                color: selected ? const Color(0xFF111111) : const Color(0xFF666666),
+                color: selected
+                    ? const Color(0xFF111111)
+                    : const Color(0xFF666666),
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 1.5,
@@ -435,7 +469,10 @@ class _SttTtsScreenState extends State<SttTtsScreen> {
               onTap: () => _onLocaleSelected(locale),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 7,
+                ),
                 decoration: BoxDecoration(
                   color: selected
                       ? const Color(0xFFD4AF37)
@@ -590,8 +627,7 @@ class _SttTtsScreenState extends State<SttTtsScreen> {
   }
 
   Widget _buildOfflineMicButton() {
-    final Color micColor =
-        _isListening ? Colors.red : const Color(0xFFD4AF37);
+    final Color micColor = _isListening ? Colors.red : const Color(0xFFD4AF37);
     return Center(
       child: GestureDetector(
         onTap: _toggleOfflineListening,
@@ -659,9 +695,7 @@ class _SttTtsScreenState extends State<SttTtsScreen> {
             border: Border.all(color: micColor, width: 3),
             boxShadow: shadows,
           ),
-          child: Center(
-            child: Icon(micIcon, size: 40, color: micColor),
-          ),
+          child: Center(child: Icon(micIcon, size: 40, color: micColor)),
         ),
       ),
     );
@@ -718,8 +752,10 @@ class _SttTtsScreenState extends State<SttTtsScreen> {
             ),
             decoration: InputDecoration(
               hintText: 'Enter text to speak...',
-              hintStyle:
-                  const TextStyle(color: Color(0xFF444444), fontSize: 14),
+              hintStyle: const TextStyle(
+                color: Color(0xFF444444),
+                fontSize: 14,
+              ),
               filled: true,
               fillColor: const Color(0xFF161616),
               contentPadding: const EdgeInsets.all(16),
@@ -733,8 +769,10 @@ class _SttTtsScreenState extends State<SttTtsScreen> {
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide:
-                    const BorderSide(color: Color(0xFFD4AF37), width: 1.5),
+                borderSide: const BorderSide(
+                  color: Color(0xFFD4AF37),
+                  width: 1.5,
+                ),
               ),
             ),
           ),
@@ -762,10 +800,10 @@ class _SttTtsScreenState extends State<SttTtsScreen> {
 
   Widget _buildSpeakStopButtons() {
     final bool speaking = _isOnlineMode ? _onlineSpeaking : _isSpeaking;
-    final VoidCallback onSpeak =
-        _isOnlineMode ? _onlineSpeak : _offlineSpeak;
-    final VoidCallback? onStop =
-        speaking ? (_isOnlineMode ? _onlineStop : _offlineStop) : null;
+    final VoidCallback onSpeak = _isOnlineMode ? _onlineSpeak : _offlineSpeak;
+    final VoidCallback? onStop = speaking
+        ? (_isOnlineMode ? _onlineStop : _offlineStop)
+        : null;
 
     return Row(
       children: [
@@ -887,8 +925,7 @@ class _SttTtsScreenState extends State<SttTtsScreen> {
               ),
             ),
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
                 color: const Color(0xFF161616),
                 borderRadius: BorderRadius.circular(8),
@@ -911,8 +948,7 @@ class _SttTtsScreenState extends State<SttTtsScreen> {
             activeTrackColor: const Color(0xFFD4AF37),
             inactiveTrackColor: const Color(0xFF2A2A2A),
             thumbColor: const Color(0xFFD4AF37),
-            overlayColor:
-                const Color(0xFFD4AF37).withValues(alpha: 0.15),
+            overlayColor: const Color(0xFFD4AF37).withValues(alpha: 0.15),
             trackHeight: 3.0,
           ),
           child: Slider(

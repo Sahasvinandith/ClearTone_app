@@ -19,7 +19,7 @@ sst_integrate/
 # Secrets
 .env
 
-
+ 
 # IntelliJ related
 *.iml
 *.ipr

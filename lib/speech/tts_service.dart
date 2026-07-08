@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'cache/audio_cache.dart';
 import 'exceptions.dart';
 import 'google_speech_client.dart';
+import 'phone_speaker_router.dart';
 import 'speech_config.dart';
 
 /// Online Text-to-Speech service backed by Google Cloud TTS V1.
@@ -21,6 +22,7 @@ class GcpTtsService {
   GcpTtsService(this._client, this._cache) {
     _player.onPlayerComplete.listen((_) {
       _isSpeaking = false;
+      PhoneSpeakerRouter.resetAfterTts();
     });
   }
 
@@ -45,11 +47,26 @@ class GcpTtsService {
       debugPrint('[GcpTTS] Cache miss — synthesising via API...');
       audioBytes = await _client.synthesize(trimmed, _localeId);
       await _cache.put(trimmed, voiceName, audioBytes);
-      debugPrint('[GcpTTS] Cached ${audioBytes.length} bytes for voice=$voiceName');
+      debugPrint(
+        '[GcpTTS] Cached ${audioBytes.length} bytes for voice=$voiceName',
+      );
     } else {
       debugPrint('[GcpTTS] Cache hit for voice=$voiceName');
     }
 
+    await PhoneSpeakerRouter.enableForTts();
+    await _player.setAudioContext(
+      AudioContext(
+        android: const AudioContextAndroid(
+          isSpeakerphoneOn: true,
+          audioMode: AndroidAudioMode.inCommunication,
+          stayAwake: true,
+          contentType: AndroidContentType.speech,
+          usageType: AndroidUsageType.voiceCommunication,
+          audioFocus: AndroidAudioFocus.gain,
+        ),
+      ),
+    );
     await _player.stop(); // cancel any previous playback
     _isSpeaking = true;
     await _player.play(BytesSource(audioBytes));
@@ -57,6 +74,7 @@ class GcpTtsService {
 
   Future<void> stop() async {
     await _player.stop();
+    await PhoneSpeakerRouter.resetAfterTts();
     _isSpeaking = false;
   }
 

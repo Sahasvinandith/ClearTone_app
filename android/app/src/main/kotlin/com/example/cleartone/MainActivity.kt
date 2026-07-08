@@ -5,7 +5,10 @@ import android.media.AudioTrack
 import android.media.MediaPlayer
 import android.media.AudioManager
 import android.media.AudioDeviceInfo
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.os.Build
+import android.os.Bundle
 import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -13,11 +16,14 @@ import io.flutter.plugin.common.MethodChannel
 import kotlin.math.PI
 import kotlin.math.pow
 import kotlin.math.sin
+import java.util.Locale
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.cleartone/audio"
     private var mediaPlayer: MediaPlayer? = null
     private var audioTrack: AudioTrack? = null
+    private var speakerTts: TextToSpeech? = null
+    private var pendingSpeakerTtsResult: MethodChannel.Result? = null
 
     // Assume 80 dB is our maximum reference level
     private val MAX_DB = 80.0
@@ -84,6 +90,24 @@ class MainActivity : FlutterActivity() {
                     enableBluetoothSco(enable)
                     result.success(null)
                 }
+                "enablePhoneSpeakerForTts" -> {
+                    enablePhoneSpeakerForTts()
+                    result.success(null)
+                }
+                "resetPhoneSpeakerForTts" -> {
+                    resetPhoneSpeakerForTts()
+                    result.success(null)
+                }
+                "speakTextOnPhoneSpeaker" -> {
+                    val text = call.argument<String>("text") ?: ""
+                    val localeId = call.argument<String>("localeId") ?: "en-US"
+                    val speechRate = call.argument<Double>("speechRate") ?: 0.5
+                    speakTextOnPhoneSpeaker(text, localeId, speechRate.toFloat(), result)
+                }
+                "stopTextOnPhoneSpeaker" -> {
+                    stopTextOnPhoneSpeaker()
+                    result.success(null)
+                }
                 else -> result.notImplemented()
             }
         }
@@ -142,6 +166,155 @@ class MainActivity : FlutterActivity() {
             }
         } catch (e: Exception) {
             Log.e("MainActivity", "Error managing Bluetooth SCO: ${e.message}")
+        }
+    }
+
+    private fun enablePhoneSpeakerForTts() {
+        val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
+        try {
+            audioManager.stopBluetoothSco()
+            audioManager.isBluetoothScoOn = false
+
+            try {
+                audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+            } catch (e: SecurityException) {
+                Log.e("MainActivity", "SecurityException setting mode IN_COMMUNICATION for TTS: ${e.message}")
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val speaker = audioManager
+                    .getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                    .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                if (speaker != null) {
+                    audioManager.setCommunicationDevice(speaker)
+                }
+            }
+
+            audioManager.isSpeakerphoneOn = true
+            Log.d("MainActivity", "TTS routed to phone speaker")
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error routing TTS to phone speaker: ${e.message}")
+        }
+    }
+
+    private fun resetPhoneSpeakerForTts() {
+        val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                audioManager.clearCommunicationDevice()
+            }
+            audioManager.isSpeakerphoneOn = false
+            try {
+                audioManager.mode = AudioManager.MODE_NORMAL
+            } catch (e: SecurityException) {
+                Log.e("MainActivity", "SecurityException resetting mode after TTS: ${e.message}")
+            }
+            Log.d("MainActivity", "TTS speaker route reset")
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error resetting TTS speaker route: ${e.message}")
+        }
+    }
+
+    private fun speakTextOnPhoneSpeaker(
+        text: String,
+        localeId: String,
+        speechRate: Float,
+        result: MethodChannel.Result
+    ) {
+        if (text.isBlank()) {
+            result.error("INVALID_ARGUMENT", "Text is empty.", null)
+            return
+        }
+
+        pendingSpeakerTtsResult?.success(null)
+        pendingSpeakerTtsResult = result
+        enablePhoneSpeakerForTts()
+
+        val utteranceId = "cleartone_tts_${System.currentTimeMillis()}"
+        val speak: (TextToSpeech) -> Unit = { tts ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                tts.setAudioAttributes(
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
+            }
+            tts.language = localeFromId(localeId)
+            tts.setSpeechRate(speechRate.coerceIn(0.1f, 2.0f))
+            tts.setOnUtteranceProgressListener(
+                object : UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String?) = Unit
+
+                    override fun onDone(utteranceId: String?) {
+                        runOnUiThread {
+                            pendingSpeakerTtsResult?.success(null)
+                            pendingSpeakerTtsResult = null
+                            resetPhoneSpeakerForTts()
+                        }
+                    }
+
+                    @Deprecated("Deprecated in Java")
+                    override fun onError(utteranceId: String?) {
+                        onError(utteranceId, TextToSpeech.ERROR)
+                    }
+
+                    override fun onError(utteranceId: String?, errorCode: Int) {
+                        runOnUiThread {
+                            pendingSpeakerTtsResult?.error(
+                                "TTS_ERROR",
+                                "Android TTS failed with code $errorCode",
+                                null
+                            )
+                            pendingSpeakerTtsResult = null
+                            resetPhoneSpeakerForTts()
+                        }
+                    }
+                }
+            )
+
+            val params = Bundle()
+            val status = tts.speak(text, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
+            if (status == TextToSpeech.ERROR) {
+                pendingSpeakerTtsResult?.error("TTS_ERROR", "Android TTS failed to start.", null)
+                pendingSpeakerTtsResult = null
+                resetPhoneSpeakerForTts()
+            }
+        }
+
+        val existingTts = speakerTts
+        if (existingTts != null) {
+            speak(existingTts)
+            return
+        }
+
+        speakerTts = TextToSpeech(this) { status ->
+            runOnUiThread {
+                val initializedTts = speakerTts
+                if (status == TextToSpeech.SUCCESS && initializedTts != null) {
+                    speak(initializedTts)
+                } else {
+                    pendingSpeakerTtsResult?.error("TTS_INIT_ERROR", "Android TTS could not initialize.", null)
+                    pendingSpeakerTtsResult = null
+                    resetPhoneSpeakerForTts()
+                }
+            }
+        }
+    }
+
+    private fun stopTextOnPhoneSpeaker() {
+        speakerTts?.stop()
+        pendingSpeakerTtsResult?.success(null)
+        pendingSpeakerTtsResult = null
+        resetPhoneSpeakerForTts()
+    }
+
+    private fun localeFromId(localeId: String): Locale {
+        val parts = localeId.split("-", "_")
+        return when {
+            parts.size >= 2 -> Locale(parts[0], parts[1])
+            parts.isNotEmpty() -> Locale(parts[0])
+            else -> Locale.US
         }
     }
 
