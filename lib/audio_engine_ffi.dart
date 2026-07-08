@@ -1,5 +1,6 @@
 import 'dart:ffi';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 
 // C Function Signature
@@ -52,14 +53,27 @@ typedef _StopRtStreamDart = int Function();
 typedef _UpdateRtParamsC = Int32 Function(Pointer<Float> loss6);
 typedef _UpdateRtParamsDart = int Function(Pointer<Float> loss6);
 
+typedef _GetRtInputSampleRateC = Int32 Function();
+typedef _GetRtInputSampleRateDart = int Function();
+
+typedef _DrainRtInputFramesC =
+    Int32 Function(Pointer<Float> out, Int32 maxFrames);
+typedef _DrainRtInputFramesDart =
+    int Function(Pointer<Float> out, int maxFrames);
+
+typedef _ClearRtInputFramesC = Void Function();
+typedef _ClearRtInputFramesDart = void Function();
+
 typedef _DebugStartCaptureC = Void Function();
 typedef _DebugStartCaptureDart = void Function();
 
 typedef _DebugStopCaptureC = Void Function();
 typedef _DebugStopCaptureDart = void Function();
 
-typedef _DebugSaveCaptureC = Int32 Function(Pointer<Utf8> filePath, Int32 source);
-typedef _DebugSaveCaptureDart = int Function(Pointer<Utf8> filePath, int source);
+typedef _DebugSaveCaptureC =
+    Int32 Function(Pointer<Utf8> filePath, Int32 source);
+typedef _DebugSaveCaptureDart =
+    int Function(Pointer<Utf8> filePath, int source);
 
 typedef _DebugGetCaptureSizeC = Int32 Function();
 typedef _DebugGetCaptureSizeDart = int Function();
@@ -85,6 +99,9 @@ class AudioEngineFFI {
   late final _StartRtStreamDart _startRtStream;
   late final _StopRtStreamDart _stopRtStream;
   late final _UpdateRtParamsDart _updateRtParams;
+  late final _GetRtInputSampleRateDart _getRtInputSampleRate;
+  late final _DrainRtInputFramesDart _drainRtInputFrames;
+  late final _ClearRtInputFramesDart _clearRtInputFrames;
   late final _DebugStartCaptureDart _debugStartCapture;
   late final _DebugStopCaptureDart _debugStopCapture;
   late final _DebugSaveCaptureDart _debugSaveCapture;
@@ -97,6 +114,10 @@ class AudioEngineFFI {
   // Persistent native buffer for updateRtParams — avoids calloc/free on every
   // slider change (which fires many times per second during a drag).
   final Pointer<Float> _rtLossBuffer = calloc<Float>(6);
+  static const int _inputDrainBufferFrames = 8192;
+  final Pointer<Float> _inputDrainBuffer = calloc<Float>(
+    _inputDrainBufferFrames,
+  );
 
   AudioEngineFFI._internal() {
     if (Platform.isAndroid) {
@@ -125,17 +146,40 @@ class AudioEngineFFI {
           'update_rt_params_ffi',
         );
 
-    _debugStartCapture = _lib.lookupFunction<_DebugStartCaptureC,
-        _DebugStartCaptureDart>('debug_start_capture_ffi');
+    _getRtInputSampleRate = _lib
+        .lookupFunction<_GetRtInputSampleRateC, _GetRtInputSampleRateDart>(
+          'get_rt_input_sample_rate_ffi',
+        );
 
-    _debugStopCapture = _lib.lookupFunction<_DebugStopCaptureC,
-        _DebugStopCaptureDart>('debug_stop_capture_ffi');
+    _drainRtInputFrames = _lib
+        .lookupFunction<_DrainRtInputFramesC, _DrainRtInputFramesDart>(
+          'drain_rt_input_frames_ffi',
+        );
 
-    _debugSaveCapture = _lib.lookupFunction<_DebugSaveCaptureC,
-        _DebugSaveCaptureDart>('debug_save_capture_ffi');
+    _clearRtInputFrames = _lib
+        .lookupFunction<_ClearRtInputFramesC, _ClearRtInputFramesDart>(
+          'clear_rt_input_frames_ffi',
+        );
 
-    _debugGetCaptureSize = _lib.lookupFunction<_DebugGetCaptureSizeC,
-        _DebugGetCaptureSizeDart>('debug_get_capture_size_ffi');
+    _debugStartCapture = _lib
+        .lookupFunction<_DebugStartCaptureC, _DebugStartCaptureDart>(
+          'debug_start_capture_ffi',
+        );
+
+    _debugStopCapture = _lib
+        .lookupFunction<_DebugStopCaptureC, _DebugStopCaptureDart>(
+          'debug_stop_capture_ffi',
+        );
+
+    _debugSaveCapture = _lib
+        .lookupFunction<_DebugSaveCaptureC, _DebugSaveCaptureDart>(
+          'debug_save_capture_ffi',
+        );
+
+    _debugGetCaptureSize = _lib
+        .lookupFunction<_DebugGetCaptureSizeC, _DebugGetCaptureSizeDart>(
+          'debug_get_capture_size_ffi',
+        );
 
     _setAudioUsage = _lib.lookupFunction<_SetAudioUsageC, _SetAudioUsageDart>(
       'set_audio_usage_ffi',
@@ -145,13 +189,15 @@ class AudioEngineFFI {
       'is_playing_ffi',
     );
 
-    _setEnvironmentMode = _lib.lookupFunction<_SetEnvironmentModeC, _SetEnvironmentModeDart>(
-      'set_environment_mode_ffi',
-    );
+    _setEnvironmentMode = _lib
+        .lookupFunction<_SetEnvironmentModeC, _SetEnvironmentModeDart>(
+          'set_environment_mode_ffi',
+        );
 
-    _setExpanderEnabled = _lib.lookupFunction<_SetExpanderEnabledC, _SetExpanderEnabledDart>(
-      'set_expander_enabled_ffi',
-    );
+    _setExpanderEnabled = _lib
+        .lookupFunction<_SetExpanderEnabledC, _SetExpanderEnabledDart>(
+          'set_expander_enabled_ffi',
+        );
   }
 
   /// Processes the audio file at [inPath] and saves it to [outPath].
@@ -230,6 +276,31 @@ class AudioEngineFFI {
       _rtLossBuffer[i] = loss6[i];
     }
     return _updateRtParams(_rtLossBuffer);
+  }
+
+  /// Returns the active Oboe input sample rate, or 0 when the stream is stopped.
+  int getRtInputSampleRate() {
+    return _getRtInputSampleRate();
+  }
+
+  /// Drains raw pre-DSP mic samples from the active Oboe stream into [target].
+  /// Returns the number of frames copied.
+  int drainRtInputFrames(Float32List target) {
+    final int maxFrames = target.length < _inputDrainBufferFrames
+        ? target.length
+        : _inputDrainBufferFrames;
+    if (maxFrames <= 0) return 0;
+
+    final int frames = _drainRtInputFrames(_inputDrainBuffer, maxFrames);
+    if (frames <= 0) return 0;
+
+    target.setRange(0, frames, _inputDrainBuffer.asTypedList(frames));
+    return frames;
+  }
+
+  /// Drops pending raw mic frames so a new detector starts from live audio.
+  void clearRtInputFrames() {
+    _clearRtInputFrames();
   }
 
   /// Starts capturing input audio samples for debugging.

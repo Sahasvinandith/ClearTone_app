@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../audio_engine_ffi.dart';
 import '../services/environment_detector.dart';
 
 class EnvironmentScreen extends StatefulWidget {
@@ -15,13 +16,14 @@ class EnvironmentScreen extends StatefulWidget {
 class _EnvironmentScreenState extends State<EnvironmentScreen>
     with TickerProviderStateMixin {
   // ---- Service ----
+  final AudioEngineFFI _audioEngine = AudioEngineFFI();
   final EnvironmentDetectorService _detector = EnvironmentDetectorService();
   StreamSubscription<EnvironmentResult>? _resultSub;
   EnvironmentResult _latest = EnvironmentResult.initializing;
   bool _isDetecting = false;
 
   // ---- Settings (mirrored locally so sliders update immediately) ----
-  double _silenceThreshold = 0.025;
+  double _silenceThreshold = 0.01;
   double _hopSeconds = 1.0;
   bool _useVoteSmoothing = true;
 
@@ -37,9 +39,10 @@ class _EnvironmentScreenState extends State<EnvironmentScreen>
       vsync: this,
       duration: const Duration(milliseconds: 1200),
     );
-    _pulseAnim = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
-    );
+    _pulseAnim = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
   }
 
   @override
@@ -69,12 +72,28 @@ class _EnvironmentScreenState extends State<EnvironmentScreen>
       return;
     }
 
+    if (!_audioEngine.isPlaying()) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Start real-time amplification before environment detection.',
+            ),
+            backgroundColor: Color(0xFF1C1C1C),
+          ),
+        );
+      }
+      return;
+    }
+
     final status = await Permission.microphone.request();
     if (!status.isGranted) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Microphone permission is required for environment detection.'),
+            content: Text(
+              'Microphone permission is required for environment detection.',
+            ),
             backgroundColor: Color(0xFF1C1C1C),
           ),
         );
@@ -271,7 +290,9 @@ class _EnvironmentScreenState extends State<EnvironmentScreen>
                             value: _latest.confidence,
                             minHeight: 8,
                             backgroundColor: const Color(0xFF2A2A2A),
-                            valueColor: AlwaysStoppedAnimation<Color>(modeColor),
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              modeColor,
+                            ),
                           ),
                         ),
                       ),
@@ -288,9 +309,7 @@ class _EnvironmentScreenState extends State<EnvironmentScreen>
                             ),
                           ),
                           const SizedBox(width: 12),
-                          Expanded(
-                            child: _buildRmsCard(),
-                          ),
+                          Expanded(child: _buildRmsCard()),
                         ],
                       ),
                     ],
@@ -318,7 +337,9 @@ class _EnvironmentScreenState extends State<EnvironmentScreen>
                           ? Colors.red.withValues(alpha: 0.1)
                           : const Color(0xFFD4AF37).withValues(alpha: 0.1),
                       border: Border.all(
-                        color: _isDetecting ? Colors.red : const Color(0xFFD4AF37),
+                        color: _isDetecting
+                            ? Colors.red
+                            : const Color(0xFFD4AF37),
                         width: 3,
                       ),
                       boxShadow: _isDetecting
@@ -335,7 +356,9 @@ class _EnvironmentScreenState extends State<EnvironmentScreen>
                       child: Icon(
                         Icons.power_settings_new,
                         size: 44,
-                        color: _isDetecting ? Colors.red : const Color(0xFFD4AF37),
+                        color: _isDetecting
+                            ? Colors.red
+                            : const Color(0xFFD4AF37),
                       ),
                     ),
                   ),

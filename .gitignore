@@ -18,6 +18,7 @@ sst_integrate/
 
 # Secrets
 .env
+context/
 
  
 # IntelliJ related
