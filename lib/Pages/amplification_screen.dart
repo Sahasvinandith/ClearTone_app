@@ -62,14 +62,14 @@ class _AmplificationScreenState extends State<AmplificationScreen>
   int? _pendingMode; // mode waiting to apply after conversation hold expires
 
   // Real-time sliders
-  final List<int> _rtBands = [
-    500,
-    1000,
-    2000,
-    4000,
-    8000,
-    16000,
-  ]; // Display labels
+  final List<String> _rtBandLabels = [
+    '<500 Hz',
+    '500-1k Hz',
+    '1-2k Hz',
+    '2-4k Hz',
+    '4-8k Hz',
+    '>8k Hz',
+  ];
   late List<double> _rtLosses;
 
   @override
@@ -1728,12 +1728,13 @@ class _AmplificationScreenState extends State<AmplificationScreen>
                     child: Row(
                       children: [
                         SizedBox(
-                          width: 60,
+                          width: 76,
                           child: Text(
-                            '${_rtBands[i]} Hz',
+                            _rtBandLabels[i],
                             style: const TextStyle(
                               color: Colors.white70,
                               fontWeight: FontWeight.bold,
+                              fontSize: 12,
                             ),
                           ),
                         ),
