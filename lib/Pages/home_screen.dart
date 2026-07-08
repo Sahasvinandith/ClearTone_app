@@ -106,16 +106,21 @@ class _AmplificationTile extends StatelessWidget {
       valueListenable: amplificationStatusNotifier,
       builder: (context, status, _) {
         return Container(
-          padding: EdgeInsets.all(compact ? 14 : 18),
+          padding: EdgeInsets.all(compact ? 12 : 16),
           decoration: BoxDecoration(
             color: const Color(0xFF1C1C1C),
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: const Color(0xFF2A2A2A)),
+            border: Border.all(
+              color: status.isStreaming
+                  ? const Color(0xFFE65B5B)
+                  : const Color(0xFF55D18A),
+              width: 1.4,
+            ),
           ),
           child: LayoutBuilder(
             builder: (context, constraints) {
               final tight = constraints.maxHeight < 360;
-              final sectionGap = tight ? 8.0 : 14.0;
+              final sectionGap = tight ? 6.0 : 10.0;
 
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -127,14 +132,14 @@ class _AmplificationTile extends StatelessWidget {
                   _ModePicker(status: status, compact: tight),
                   SizedBox(height: sectionGap),
                   _DetectionReadout(status: status, compact: tight),
-                  const Spacer(),
+                  SizedBox(height: tight ? 2 : 4),
                   TextButton.icon(
                     onPressed: onOpenAmplification,
                     icon: const Icon(Icons.tune, size: 18),
                     label: const Text('ADVANCED CONTROLS'),
                     style: TextButton.styleFrom(
                       foregroundColor: const Color(0xFF9D9D9D),
-                      padding: EdgeInsets.symmetric(vertical: tight ? 8 : 12),
+                      padding: EdgeInsets.symmetric(vertical: tight ? 4 : 6),
                     ),
                   ),
                 ],
@@ -176,9 +181,7 @@ class _AmplificationSummary extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                status.isStreaming
-                    ? 'AMPLIFICATION ACTIVE'
-                    : 'AMPLIFICATION READY',
+                'AMPLIFICATION',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
@@ -203,10 +206,10 @@ class _AmplificationSummary extends StatelessWidget {
           ),
         ),
         _StatusPill(
-          label: status.isControllerReady ? 'READY' : 'LOADING',
-          color: status.isControllerReady
-              ? const Color(0xFF55D18A)
-              : const Color(0xFFFFA24A),
+          label: status.isStreaming ? 'ACTIVE' : 'READY',
+          color: status.isStreaming
+              ? const Color(0xFFE65B5B)
+              : const Color(0xFF55D18A),
           compact: compact,
         ),
       ],
