@@ -46,6 +46,10 @@ dependencies:
   tflite_flutter: ^0.12.0
   speech_to_text: ^7.0.0
   flutter_tts: ^4.2.0
+  flutter_dotenv: ^5.2.1
+  http: ^1.2.1
+  crypto: ^3.0.6
+  googleapis_auth: ^2.0.0
 
 dev_dependencies:
   flutter_test:
@@ -83,6 +87,7 @@ flutter:
 
   # To add assets to your application, add an assets section, like this:
   assets:
+    - .env
     - assets/audio/
     - assets/models/
     - assets/images/

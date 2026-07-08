@@ -16,6 +16,9 @@ migrate_working_dir/
 env_detect/
 sst_integrate/
 
+# Secrets
+.env
+
 
 # IntelliJ related
 *.iml
