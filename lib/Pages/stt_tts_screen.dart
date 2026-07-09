@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -9,6 +12,8 @@ import '../speech/phone_speaker_router.dart';
 import '../speech/speech_config.dart';
 import '../speech/speech_service.dart';
 
+enum _CommunicationTool { speechToText, textToSpeech }
+
 class SttTtsScreen extends StatefulWidget {
   const SttTtsScreen({super.key});
 
@@ -17,6 +22,8 @@ class SttTtsScreen extends StatefulWidget {
 }
 
 class _SttTtsScreenState extends State<SttTtsScreen> {
+  _CommunicationTool? _selectedTool;
+
   // ---- Mode ----
   bool _isOnlineMode = false;
   String _selectedLocale = 'en-US';
@@ -134,6 +141,14 @@ class _SttTtsScreenState extends State<SttTtsScreen> {
   // ---------------------------------------------------------------------------
 
   Future<void> _switchMode(bool online) async {
+    if (online && !_isOnlineMode) {
+      final hasConnection = await _hasInternetConnection();
+      if (!hasConnection) {
+        await _showConnectionRequiredDialog();
+        return;
+      }
+    }
+
     // Stop any active sessions before switching.
     if (_isListening) {
       await _stt.stop();
@@ -168,6 +183,50 @@ class _SttTtsScreenState extends State<SttTtsScreen> {
   void _onLocaleSelected(String locale) {
     setState(() => _selectedLocale = locale);
     _speechService?.setLanguage(locale);
+  }
+
+  Future<bool> _hasInternetConnection() async {
+    try {
+      final result = await InternetAddress.lookup(
+        'google.com',
+      ).timeout(const Duration(seconds: 3));
+      return result.isNotEmpty && result.first.rawAddress.isNotEmpty;
+    } on SocketException {
+      return false;
+    } on TimeoutException {
+      return false;
+    }
+  }
+
+  Future<void> _stopActiveToolSessions() async {
+    if (_isListening) {
+      await _stt.stop();
+    }
+    if (_isRecording) {
+      await _speechService?.stt.cancel();
+    }
+    await PhoneSpeakerRouter.stopTextOnSpeaker();
+    await _tts.stop();
+    await _speechService?.tts.stop();
+    await PhoneSpeakerRouter.resetAfterTts();
+
+    if (!mounted) return;
+    setState(() {
+      _isListening = false;
+      _isRecording = false;
+      _isProcessing = false;
+      _isSpeaking = false;
+      _onlineSpeaking = false;
+    });
+  }
+
+  void _openTool(_CommunicationTool tool) {
+    setState(() => _selectedTool = tool);
+  }
+
+  Future<void> _returnToToolList() async {
+    await _stopActiveToolSessions();
+    if (mounted) setState(() => _selectedTool = null);
   }
 
   // ---------------------------------------------------------------------------
@@ -356,20 +415,50 @@ class _SttTtsScreenState extends State<SttTtsScreen> {
     );
   }
 
+  Future<void> _showConnectionRequiredDialog() async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Connection Required'),
+          content: const Text(
+            'Online speech tools need an internet connection. Please connect to the internet and try again.',
+            style: TextStyle(color: Colors.white70),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('OK'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // Build
   // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
+    final selectedTool = _selectedTool;
+
     return Scaffold(
       backgroundColor: const Color(0xFF111111),
       appBar: AppBar(
         backgroundColor: const Color(0xFF1C1C1C),
         elevation: 0,
         centerTitle: true,
+        leading: selectedTool == null
+            ? null
+            : IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: _returnToToolList,
+              ),
         title: const Text(
-          'SPEECH ASSISTANT',
+          'COMMUNICATION TOOLS',
           style: TextStyle(
             color: Colors.white,
             letterSpacing: 2,
@@ -381,17 +470,115 @@ class _SttTtsScreenState extends State<SttTtsScreen> {
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+          child: selectedTool == null
+              ? _buildToolList()
+              : _buildSelectedTool(selectedTool),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildToolList() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildToolBox(
+          icon: Icons.mic_none,
+          name: 'Speech to Text',
+          introduction:
+              'Turn spoken words into a readable transcript using offline recognition or online cloud transcription.',
+          onTap: () => _openTool(_CommunicationTool.speechToText),
+        ),
+        const SizedBox(height: 14),
+        _buildToolBox(
+          icon: Icons.record_voice_over_outlined,
+          name: 'Text to Speech',
+          introduction:
+              'Type a message and play it aloud through the phone speaker using offline or online voices.',
+          onTap: () => _openTool(_CommunicationTool.textToSpeech),
+        ),
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+
+  Widget _buildSelectedTool(_CommunicationTool selectedTool) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildModeToggle(),
+        const SizedBox(height: 16),
+        if (_isOnlineMode) _buildLocaleSelector(),
+        if (_isOnlineMode) const SizedBox(height: 20),
+        if (selectedTool == _CommunicationTool.speechToText) _buildSttCard(),
+        if (selectedTool == _CommunicationTool.textToSpeech) _buildTtsCard(),
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+
+  Widget _buildToolBox({
+    required IconData icon,
+    required String name,
+    required String introduction,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1C1C1C),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: const Color(0xFF2A2A2A)),
+          ),
+          child: Row(
             children: [
-              _buildModeToggle(),
-              const SizedBox(height: 16),
-              if (_isOnlineMode) _buildLocaleSelector(),
-              if (_isOnlineMode) const SizedBox(height: 20),
-              _buildSttCard(),
-              const SizedBox(height: 20),
-              _buildTtsCard(),
-              const SizedBox(height: 24),
+              Container(
+                height: 48,
+                width: 48,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFD4AF37).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFFD4AF37)),
+                ),
+                child: Icon(icon, color: const Color(0xFFD4AF37), size: 24),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name.toUpperCase(),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      introduction,
+                      style: const TextStyle(
+                        color: Color(0xFF888888),
+                        fontSize: 12,
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              const Icon(
+                Icons.chevron_right,
+                color: Color(0xFF666666),
+                size: 22,
+              ),
             ],
           ),
         ),
