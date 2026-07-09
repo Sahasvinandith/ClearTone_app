@@ -20,10 +20,7 @@ class AmplificationScreen extends StatefulWidget {
   State<AmplificationScreen> createState() => _AmplificationScreenState();
 }
 
-class _AmplificationScreenState extends State<AmplificationScreen>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabController;
-
+class _AmplificationScreenState extends State<AmplificationScreen> {
   // --- Record Mode State ---
   AudioRecorder _audioRecorder = AudioRecorder();
   final AudioPlayer _audioPlayer = AudioPlayer();
@@ -40,6 +37,7 @@ class _AmplificationScreenState extends State<AmplificationScreen>
   Timer? _demoProcessDebounce;
   int _demoProcessGeneration = 0;
   Duration _playbackPosition = Duration.zero;
+  bool _showRecordTools = false;
 
   // --- Real-time Mode State ---
   static const MethodChannel _audioChannel = MethodChannel(
@@ -82,7 +80,6 @@ class _AmplificationScreenState extends State<AmplificationScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
     _checkPermissions().then((_) {
       if (_hasPermission) {
         _fetchAudioDevices();
@@ -135,7 +132,6 @@ class _AmplificationScreenState extends State<AmplificationScreen>
     _conversationHoldTimer?.cancel();
     _demoProcessDebounce?.cancel();
     _envDetector?.stop().then((_) => _envDetector?.dispose());
-    _tabController.dispose();
     _envSilenceThresholdController.dispose();
     _audioRecorder.dispose();
     _audioPlayer.dispose();
@@ -1391,6 +1387,10 @@ class _AmplificationScreenState extends State<AmplificationScreen>
     );
   }
 
+  void _openRecordToolsPage() {
+    setState(() => _showRecordTools = true);
+  }
+
   Widget _buildDemoPlaybackButton({
     required String label,
     required IconData icon,
@@ -2205,6 +2205,25 @@ class _AmplificationScreenState extends State<AmplificationScreen>
               ],
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+            child: SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _openRecordToolsPage,
+                icon: const Icon(Icons.mic_none_outlined, size: 18),
+                label: const Text('OPEN RECORDING TOOLS'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFFD4AF37),
+                  side: const BorderSide(color: Color(0xFFD4AF37)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -2217,31 +2236,24 @@ class _AmplificationScreenState extends State<AmplificationScreen>
       appBar: AppBar(
         backgroundColor: const Color(0xFF1C1C1C),
         elevation: 0,
-        title: const Text(
-          'AMPLIFICATION',
-          style: TextStyle(
+        leading: _showRecordTools
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: () => setState(() => _showRecordTools = false),
+              )
+            : null,
+        title: Text(
+          _showRecordTools ? 'RECORDING TOOLS' : 'AMPLIFICATION',
+          style: const TextStyle(
             letterSpacing: 1.5,
             fontWeight: FontWeight.w600,
             fontSize: 16,
           ),
         ),
         centerTitle: true,
-        bottom: TabBar(
-          controller: _tabController,
-          indicatorColor: const Color(0xFFD4AF37),
-          labelColor: const Color(0xFFD4AF37),
-          unselectedLabelColor: const Color(0xFF666666),
-          tabs: const [
-            Tab(text: "RECORD"),
-            Tab(text: "REAL-TIME"),
-          ],
-        ),
       ),
       body: SafeArea(
-        child: TabBarView(
-          controller: _tabController,
-          children: [_buildRecordTab(), _buildRealTimeTab()],
-        ),
+        child: _showRecordTools ? _buildRecordTab() : _buildRealTimeTab(),
       ),
     );
   }
