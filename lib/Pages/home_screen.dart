@@ -8,6 +8,7 @@ class HomeScreen extends StatelessWidget {
   final Profile profile;
   final VoidCallback onOpenTools;
   final VoidCallback onOpenAmplification;
+  final VoidCallback onStartHearingTest;
   final VoidCallback onOpenProfileTab;
   final VoidCallback onOpenProfileSelection;
 
@@ -16,6 +17,7 @@ class HomeScreen extends StatelessWidget {
     required this.profile,
     required this.onOpenTools,
     required this.onOpenAmplification,
+    required this.onStartHearingTest,
     required this.onOpenProfileTab,
     required this.onOpenProfileSelection,
   });
@@ -43,10 +45,15 @@ class HomeScreen extends StatelessWidget {
                   SizedBox(height: compact ? 8 : 12),
                   _Header(name: profile.name, compact: compact),
                   SizedBox(height: gap),
-                  _AmplificationTile(
-                    compact: compact,
-                    onOpenAmplification: onOpenAmplification,
-                  ),
+                  profile.testResults.isEmpty
+                      ? _HearingTestPromptTile(
+                          compact: compact,
+                          onStartHearingTest: onStartHearingTest,
+                        )
+                      : _AmplificationTile(
+                          compact: compact,
+                          onOpenAmplification: onOpenAmplification,
+                        ),
                   SizedBox(height: gap),
                   _ToolsTile(onTap: onOpenTools, compact: compact),
                 ],
@@ -394,6 +401,90 @@ class _AmplificationTile extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _HearingTestPromptTile extends StatelessWidget {
+  final bool compact;
+  final VoidCallback onStartHearingTest;
+
+  const _HearingTestPromptTile({
+    required this.compact,
+    required this.onStartHearingTest,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.all(compact ? 16 : 20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1C1C1C),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFD4AF37), width: 1.4),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: compact ? 42 : 52,
+                height: compact ? 42 : 52,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFD4AF37).withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(
+                  Icons.monitor_heart_outlined,
+                  color: const Color(0xFFD4AF37),
+                  size: compact ? 24 : 30,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'START WITH A HEARING TEST',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: compact ? 13 : 16,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Complete one test so ClearTone can tune amplification to your profile.',
+                      maxLines: compact ? 2 : 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: const Color(0xFF9A9A9A),
+                        fontSize: compact ? 12 : 13,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: compact ? 14 : 18),
+          ElevatedButton.icon(
+            onPressed: onStartHearingTest,
+            icon: const Icon(Icons.hearing),
+            label: const Text('START HEARING TEST'),
+            style: ElevatedButton.styleFrom(
+              padding: EdgeInsets.symmetric(vertical: compact ? 12 : 15),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

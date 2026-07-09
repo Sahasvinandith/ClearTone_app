@@ -18,6 +18,7 @@ class HomeWrapper extends StatefulWidget {
 
 class _HomeWrapperState extends State<HomeWrapper> {
   int _currentIndex = 0;
+  int _startTestRequest = 0;
 
   void _openTab(int index) {
     setState(() {
@@ -32,23 +33,34 @@ class _HomeWrapperState extends State<HomeWrapper> {
     );
   }
 
-  late final List<Widget> _screens = [
-    HomeScreen(
-      profile: widget.profile,
-      onOpenTools: () => _openTab(1),
-      onOpenAmplification: () => _openTab(2),
-      onOpenProfileTab: () => _openTab(3),
-      onOpenProfileSelection: _openProfileSelection,
-    ),
-    const SttTtsScreen(),
-    AmplificationScreen(profile: widget.profile),
-    ProfileTabScreen(profile: widget.profile),
-  ];
+  void _openHearingTest() {
+    setState(() {
+      _currentIndex = 3;
+      _startTestRequest++;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    final screens = [
+      HomeScreen(
+        profile: widget.profile,
+        onOpenTools: () => _openTab(1),
+        onOpenAmplification: () => _openTab(2),
+        onStartHearingTest: _openHearingTest,
+        onOpenProfileTab: () => _openTab(3),
+        onOpenProfileSelection: _openProfileSelection,
+      ),
+      const SttTtsScreen(),
+      AmplificationScreen(profile: widget.profile),
+      ProfileTabScreen(
+        profile: widget.profile,
+        startTestRequest: _startTestRequest,
+      ),
+    ];
+
     return Scaffold(
-      body: IndexedStack(index: _currentIndex, children: _screens),
+      body: IndexedStack(index: _currentIndex, children: screens),
       // iOS Pill style TabBar container at the bottom
       bottomNavigationBar: Container(
         padding: const EdgeInsets.fromLTRB(

@@ -17,8 +17,13 @@ const Map<int, double> _freqToX = {
 
 class ProfileTabScreen extends StatefulWidget {
   final Profile profile;
+  final int startTestRequest;
 
-  const ProfileTabScreen({super.key, required this.profile});
+  const ProfileTabScreen({
+    super.key,
+    required this.profile,
+    this.startTestRequest = 0,
+  });
 
   @override
   State<ProfileTabScreen> createState() => _ProfileTabScreenState();
@@ -32,6 +37,21 @@ class _ProfileTabScreenState extends State<ProfileTabScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    if (widget.startTestRequest > 0) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _startTest();
+      });
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant ProfileTabScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.startTestRequest != oldWidget.startTestRequest) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _startTest();
+      });
+    }
   }
 
   @override
