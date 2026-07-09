@@ -127,6 +127,7 @@ class _AmplificationScreenState extends State<AmplificationScreen>
     if (_isRtStreaming) {
       _audioEngine.stopRtStream();
       _stopAmplificationForegroundService();
+      _hideAmplificationOverlay(resetDismissed: true);
       amplificationStatusNotifier.value = amplificationStatusNotifier.value
           .copyWith(isStreaming: false);
     }
@@ -193,6 +194,9 @@ class _AmplificationScreenState extends State<AmplificationScreen>
       confidence: _detectedConfidence,
       isControllerReady: amplificationController.isReady,
     );
+    if (_isRtStreaming) {
+      unawaited(_updateAmplificationOverlay());
+    }
   }
 
   void _applyMode(int mode) {
@@ -381,6 +385,88 @@ class _AmplificationScreenState extends State<AmplificationScreen>
     }
   }
 
+  String get _overlayModeLabel {
+    switch (_environmentMode) {
+      case 1:
+        return 'Transit';
+      case 2:
+        return 'Conversation';
+      default:
+        return 'Standard';
+    }
+  }
+
+  Map<String, Object> get _overlayPayload => {
+    'mode': _overlayModeLabel,
+    'autoDetectEnabled': _envDetectEnabled,
+    'detectedEnvironment': _detectedEnvironment,
+    'confidence': _detectedConfidence,
+  };
+
+  Future<bool> _canDrawAmplificationOverlay() async {
+    if (!Platform.isAndroid) return false;
+    return await _audioChannel.invokeMethod<bool>(
+          'canDrawAmplificationOverlay',
+        ) ??
+        false;
+  }
+
+  Future<void> _requestAmplificationOverlayPermission() async {
+    if (!Platform.isAndroid) return;
+    await _audioChannel.invokeMethod('requestAmplificationOverlayPermission');
+  }
+
+  Future<void> _ensureAmplificationOverlayPermission() async {
+    if (!Platform.isAndroid) return;
+    if (await _canDrawAmplificationOverlay()) return;
+
+    await _requestAmplificationOverlayPermission();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Enable "Display over other apps" to show the amplification overlay.',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showAmplificationOverlay() async {
+    if (!Platform.isAndroid) return;
+    if (!await _canDrawAmplificationOverlay()) return;
+    try {
+      await _audioChannel.invokeMethod(
+        'showAmplificationOverlay',
+        _overlayPayload,
+      );
+    } catch (e) {
+      debugPrint("Error showing amplification overlay: $e");
+    }
+  }
+
+  Future<void> _updateAmplificationOverlay() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _audioChannel.invokeMethod(
+        'updateAmplificationOverlay',
+        _overlayPayload,
+      );
+    } catch (e) {
+      debugPrint("Error updating amplification overlay: $e");
+    }
+  }
+
+  Future<void> _hideAmplificationOverlay({bool resetDismissed = true}) async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _audioChannel.invokeMethod('hideAmplificationOverlay', {
+        'resetDismissed': resetDismissed,
+      });
+    } catch (e) {
+      debugPrint("Error hiding amplification overlay: $e");
+    }
+  }
+
   Future<void> _startAmplificationForegroundService() async {
     if (!Platform.isAndroid) return;
     await _audioChannel.invokeMethod('startAmplificationForegroundService');
@@ -399,6 +485,7 @@ class _AmplificationScreenState extends State<AmplificationScreen>
     if (_isRtStreaming) {
       _audioEngine.stopRtStream();
       await _stopAmplificationForegroundService();
+      await _hideAmplificationOverlay(resetDismissed: true);
       if (_envDetectEnabled) {
         await _toggleEnvDetection(false);
       }
@@ -431,6 +518,7 @@ class _AmplificationScreenState extends State<AmplificationScreen>
       }
 
       await _requestAmplificationNotificationPermission();
+      await _ensureAmplificationOverlayPermission();
 
       // 1. Enable Bluetooth SCO only when the selected device is a BT SCO
       //    device (TYPE_BLUETOOTH_SCO = 7). When the user picks the built-in
@@ -480,9 +568,11 @@ class _AmplificationScreenState extends State<AmplificationScreen>
             _isRtStreaming = true;
           });
           _publishAmplificationStatus();
+          await _showAmplificationOverlay();
         } catch (e) {
           _audioEngine.stopRtStream();
           await _stopAmplificationForegroundService();
+          await _hideAmplificationOverlay(resetDismissed: true);
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(

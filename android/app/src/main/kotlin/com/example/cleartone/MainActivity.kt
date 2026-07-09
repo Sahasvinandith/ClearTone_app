@@ -25,12 +25,14 @@ class MainActivity : FlutterActivity() {
     private var audioTrack: AudioTrack? = null
     private var speakerTts: TextToSpeech? = null
     private var pendingSpeakerTtsResult: MethodChannel.Result? = null
+    private lateinit var amplificationOverlayManager: AmplificationOverlayManager
 
     // Assume 80 dB is our maximum reference level
     private val MAX_DB = 80.0
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        amplificationOverlayManager = AmplificationOverlayManager(this)
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler {
                 call,
@@ -126,6 +128,36 @@ class MainActivity : FlutterActivity() {
                         Log.e("MainActivity", "Failed to stop amplification foreground service", e)
                         result.error("FOREGROUND_SERVICE_ERROR", e.message, null)
                     }
+                }
+                "canDrawAmplificationOverlay" -> {
+                    result.success(amplificationOverlayManager.canDrawOverlays())
+                }
+                "requestAmplificationOverlayPermission" -> {
+                    amplificationOverlayManager.requestOverlayPermission()
+                    result.success(null)
+                }
+                "showAmplificationOverlay" -> {
+                    val shown = amplificationOverlayManager.show(
+                        call.argument<String>("mode") ?: "Standard",
+                        call.argument<Boolean>("autoDetectEnabled") ?: false,
+                        call.argument<String>("detectedEnvironment") ?: "",
+                        call.argument<Double>("confidence") ?: 0.0
+                    )
+                    result.success(shown)
+                }
+                "updateAmplificationOverlay" -> {
+                    val updated = amplificationOverlayManager.update(
+                        call.argument<String>("mode") ?: "Standard",
+                        call.argument<Boolean>("autoDetectEnabled") ?: false,
+                        call.argument<String>("detectedEnvironment") ?: "",
+                        call.argument<Double>("confidence") ?: 0.0
+                    )
+                    result.success(updated)
+                }
+                "hideAmplificationOverlay" -> {
+                    val resetDismissed = call.argument<Boolean>("resetDismissed") ?: true
+                    amplificationOverlayManager.hide(resetDismissed)
+                    result.success(null)
                 }
                 else -> result.notImplemented()
             }
