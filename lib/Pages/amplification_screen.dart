@@ -31,9 +31,15 @@ class _AmplificationScreenState extends State<AmplificationScreen>
   bool _isRecording = false;
   bool _hasPermission = false;
   List<FileSystemEntity> _recordings = [];
+  String? _selectedRecordingPath;
   String? _currentlyPlayingPath;
   bool _isPlaying = false;
-  bool _isProcessingAudioFile = false;
+  bool _demoBroadbandMode = true;
+  bool _isPreparingDemoPlayback = false;
+  late List<double> _demoLosses;
+  Timer? _demoProcessDebounce;
+  int _demoProcessGeneration = 0;
+  Duration _playbackPosition = Duration.zero;
 
   // --- Real-time Mode State ---
   static const MethodChannel _audioChannel = MethodChannel(
@@ -91,15 +97,20 @@ class _AmplificationScreenState extends State<AmplificationScreen>
           if (state == PlayerState.completed) {
             _currentlyPlayingPath = null;
             _isPlaying = false;
+            _playbackPosition = Duration.zero;
           }
         });
       }
+    });
+    _audioPlayer.onPositionChanged.listen((position) {
+      _playbackPosition = position;
     });
 
     _envSilenceThresholdController = TextEditingController(
       text: _envSilenceThreshold.toStringAsFixed(3),
     );
     _initRtGainFromProfile();
+    _demoLosses = List<double>.from(_rtLosses);
     _startReconnectTimer();
     amplificationController.register(
       setStreaming: _setRtStreaming,
@@ -118,6 +129,7 @@ class _AmplificationScreenState extends State<AmplificationScreen>
     }
     _envSub?.cancel();
     _conversationHoldTimer?.cancel();
+    _demoProcessDebounce?.cancel();
     _envDetector?.stop().then((_) => _envDetector?.dispose());
     _tabController.dispose();
     _envSilenceThresholdController.dispose();
@@ -321,7 +333,9 @@ class _AmplificationScreenState extends State<AmplificationScreen>
         }
       }
 
-      while (avgLoss.length < 6) avgLoss.add(0.0);
+      while (avgLoss.length < 6) {
+        avgLoss.add(0.0);
+      }
       if (avgLoss.length > 6) avgLoss = avgLoss.sublist(0, 6);
       _rtLosses = avgLoss;
     } else {
@@ -424,7 +438,7 @@ class _AmplificationScreenState extends State<AmplificationScreen>
 
       // 4. Start Oboe Stream
       int result = _audioEngine.startRtStream(_selectedDeviceId!);
-      print("Result: $result");
+      debugPrint("Result: $result");
       if (result == 0) {
         _audioEngine.updateRtParams(_rtLosses);
         setState(() {
@@ -432,6 +446,7 @@ class _AmplificationScreenState extends State<AmplificationScreen>
         });
         _publishAmplificationStatus();
       } else {
+        if (!mounted) return;
         // ... (rest of error handling)
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -483,6 +498,7 @@ class _AmplificationScreenState extends State<AmplificationScreen>
     try {
       final directory = await getExternalStorageDirectory();
       if (directory == null) return;
+      if (!mounted) return;
 
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final inputPath = '${directory.path}/input_verify_$timestamp.raw';
@@ -594,6 +610,8 @@ class _AmplificationScreenState extends State<AmplificationScreen>
       final profileRecordings = files.where((file) {
         final filename = file.path.split('/').last;
         return filename.startsWith('amplification_${widget.profile.name}_') &&
+            !filename.contains('_processed') &&
+            !filename.contains('_demo_') &&
             filename.endsWith('.wav');
       }).toList();
 
@@ -606,6 +624,10 @@ class _AmplificationScreenState extends State<AmplificationScreen>
       if (mounted) {
         setState(() {
           _recordings = profileRecordings;
+          if (_selectedRecordingPath != null &&
+              !_recordings.any((file) => file.path == _selectedRecordingPath)) {
+            _selectedRecordingPath = null;
+          }
         });
       }
     } catch (e) {
@@ -620,7 +642,7 @@ class _AmplificationScreenState extends State<AmplificationScreen>
     }
 
     try {
-      print("Recording started.");
+      debugPrint("Recording started.");
       final directory = await getApplicationDocumentsDirectory();
       final path =
           '${directory.path}/amplification_${widget.profile.name}_${DateTime.now().millisecondsSinceEpoch}.wav';
@@ -695,12 +717,143 @@ class _AmplificationScreenState extends State<AmplificationScreen>
     }
   }
 
+  void _selectRecording(String path) {
+    setState(() {
+      _selectedRecordingPath = _selectedRecordingPath == path ? null : path;
+    });
+    if (_selectedRecordingPath == path) {
+      _prepareDemoPlayback(restartIfPlaying: false);
+    }
+  }
+
+  String _demoOutputPath(String inputPath) {
+    final suffix = _demoBroadbandMode ? 'broadband' : 'multiband';
+    return inputPath.replaceAll('.wav', '_demo_$suffix.wav');
+  }
+
+  void _onDemoModeChanged(bool broadbandMode) {
+    setState(() {
+      _demoBroadbandMode = broadbandMode;
+      if (broadbandMode) {
+        _demoLosses = List<double>.filled(6, _demoLosses.first);
+      }
+    });
+    _prepareDemoPlayback(restartIfPlaying: _isPlaying);
+  }
+
+  void _onDemoLossChanged(int index, double value) {
+    setState(() {
+      if (_demoBroadbandMode) {
+        _demoLosses = List<double>.filled(6, value);
+      } else {
+        _demoLosses[index] = value;
+      }
+    });
+
+    _demoProcessDebounce?.cancel();
+    _demoProcessDebounce = Timer(const Duration(milliseconds: 220), () {
+      _prepareDemoPlayback(restartIfPlaying: _isPlaying);
+    });
+  }
+
+  Future<void> _toggleDemoPlayback({required bool amplified}) async {
+    final selectedPath = _selectedRecordingPath;
+    if (selectedPath == null) return;
+
+    if (!amplified) {
+      await _togglePlayback(selectedPath);
+      return;
+    }
+
+    final outPath = await _prepareDemoPlayback(restartIfPlaying: false);
+    if (outPath == null) return;
+    await _togglePlayback(outPath);
+  }
+
+  Future<String?> _prepareDemoPlayback({required bool restartIfPlaying}) async {
+    final inputPath = _selectedRecordingPath;
+    if (inputPath == null || _isPreparingDemoPlayback) {
+      return inputPath == null ? null : _demoOutputPath(inputPath);
+    }
+
+    final generation = ++_demoProcessGeneration;
+    final outPath = _demoOutputPath(inputPath);
+    final wasPlayingDemo =
+        restartIfPlaying &&
+        _currentlyPlayingPath != null &&
+        _currentlyPlayingPath == outPath &&
+        _isPlaying;
+    final resumePosition = _playbackPosition;
+
+    if (mounted) {
+      setState(() {
+        _isPreparingDemoPlayback = true;
+      });
+    }
+
+    try {
+      if (wasPlayingDemo) {
+        await _audioPlayer.stop();
+      }
+
+      final result = _audioEngine.processAudio(
+        inPath: inputPath,
+        outPath: outPath,
+        loss6: _demoLosses,
+      );
+      if (result != 0) {
+        throw Exception('Audio engine returned error code: $result');
+      }
+
+      if (generation == _demoProcessGeneration && wasPlayingDemo) {
+        await _audioPlayer.play(DeviceFileSource(outPath));
+        if (resumePosition > Duration.zero) {
+          await _audioPlayer.seek(resumePosition);
+        }
+        if (mounted) {
+          setState(() {
+            _currentlyPlayingPath = outPath;
+          });
+        }
+      }
+
+      return outPath;
+    } catch (e) {
+      debugPrint('Error preparing demo playback: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not prepare amplified playback: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return null;
+    } finally {
+      if (mounted && generation == _demoProcessGeneration) {
+        setState(() {
+          _isPreparingDemoPlayback = false;
+        });
+      }
+    }
+  }
+
   Future<void> _deleteRecording(String path) async {
     try {
       final file = File(path);
       if (await file.exists()) {
         await file.delete();
-        if (_currentlyPlayingPath == path) {
+        final broadbandPath = path.replaceAll('.wav', '_demo_broadband.wav');
+        final multibandPath = path.replaceAll('.wav', '_demo_multiband.wav');
+        final generatedFiles = [File(broadbandPath), File(multibandPath)];
+        for (final generatedFile in generatedFiles) {
+          if (await generatedFile.exists()) {
+            await generatedFile.delete();
+          }
+        }
+        if (_currentlyPlayingPath == path ||
+            _currentlyPlayingPath == broadbandPath ||
+            _currentlyPlayingPath == multibandPath) {
           await _audioPlayer.stop();
           if (mounted) {
             setState(() {
@@ -708,6 +861,11 @@ class _AmplificationScreenState extends State<AmplificationScreen>
               _isPlaying = false;
             });
           }
+        }
+        if (_selectedRecordingPath == path) {
+          setState(() {
+            _selectedRecordingPath = null;
+          });
         }
         _loadRecordings();
       }
@@ -718,80 +876,6 @@ class _AmplificationScreenState extends State<AmplificationScreen>
 
   String _formatDateTime(DateTime dt) {
     return '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
-  }
-
-  Future<void> _processAudioFile(String inputPath) async {
-    if (_isProcessingAudioFile) return;
-
-    setState(() {
-      _isProcessingAudioFile = true;
-    });
-
-    try {
-      if (widget.profile.testResults.isEmpty) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Profile needs at least one test result to process audio!',
-              ),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-        return;
-      }
-
-      final outPath = inputPath.replaceAll('.wav', '_processed.wav');
-      final latestResult = widget.profile.testResults.last;
-
-      List<int> sortedFreqs = latestResult.leftEarResults.keys.toList()..sort();
-      List<double> avgLoss = [];
-      for (int freq in sortedFreqs) {
-        double left = latestResult.leftEarResults[freq]?.toDouble() ?? 0.0;
-        double right = latestResult.rightEarResults[freq]?.toDouble() ?? 0.0;
-        avgLoss.add((left + right) / 2.0);
-      }
-
-      while (avgLoss.length < 6) avgLoss.add(0.0);
-      if (avgLoss.length > 6) avgLoss = avgLoss.sublist(0, 6);
-
-      final result = _audioEngine.processAudio(
-        inPath: inputPath,
-        outPath: outPath,
-        loss6: avgLoss,
-      );
-
-      if (result == 0) {
-        _loadRecordings();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Audio processed successfully!'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
-      } else {
-        throw Exception('Audio engine returned error code: $result');
-      }
-    } catch (e) {
-      debugPrint('Error processing audio: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error processing audio: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isProcessingAudioFile = false;
-        });
-      }
-    }
   }
 
   // --- UI Builders ---
@@ -930,16 +1014,25 @@ class _AmplificationScreenState extends State<AmplificationScreen>
               itemBuilder: (context, index) {
                 final file = _recordings[index];
                 final stat = File(file.path).statSync();
-                final isCurrentlyPlaying = _currentlyPlayingPath == file.path;
+                final demoPath = _demoOutputPath(file.path);
+                final isSelected = _selectedRecordingPath == file.path;
+                final isCurrentlyPlaying =
+                    _currentlyPlayingPath == file.path ||
+                    _currentlyPlayingPath == demoPath;
+                final isOriginalPlaying =
+                    _currentlyPlayingPath == file.path && _isPlaying;
+                final isAmplifiedPlaying =
+                    _currentlyPlayingPath == demoPath && _isPlaying;
                 final filename = file.path.split('/').last;
 
-                return Container(
+                return AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
                   margin: const EdgeInsets.only(bottom: 8),
                   decoration: BoxDecoration(
                     color: const Color(0xFF1C1C1C),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                      color: isCurrentlyPlaying
+                      color: isSelected || isCurrentlyPlaying
                           ? const Color(0xFFD4AF37)
                           : Colors.transparent,
                       width: 1,
@@ -950,151 +1043,302 @@ class _AmplificationScreenState extends State<AmplificationScreen>
                       horizontal: 12,
                       vertical: 12,
                     ),
-                    child: Row(
+                    child: Column(
                       children: [
-                        CircleAvatar(
-                          backgroundColor: isCurrentlyPlaying
-                              ? const Color(0xFFD4AF37).withValues(alpha: 0.2)
-                              : const Color(0xFF282828),
-                          child: Icon(
-                            isCurrentlyPlaying && _isPlaying
-                                ? Icons.pause
-                                : Icons.play_arrow,
-                            color: isCurrentlyPlaying
-                                ? const Color(0xFFD4AF37)
-                                : Colors.white,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                        InkWell(
+                          onTap: () => _selectRecording(file.path),
+                          borderRadius: BorderRadius.circular(10),
+                          child: Row(
                             children: [
-                              Text(
-                                filename,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w500,
+                              CircleAvatar(
+                                backgroundColor: isSelected
+                                    ? const Color(
+                                        0xFFD4AF37,
+                                      ).withValues(alpha: 0.2)
+                                    : const Color(0xFF282828),
+                                child: Icon(
+                                  isSelected ? Icons.tune : Icons.graphic_eq,
+                                  color: isSelected
+                                      ? const Color(0xFFD4AF37)
+                                      : Colors.white,
                                 ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
                               ),
-                              const SizedBox(height: 4),
-                              Row(
-                                children: [
-                                  const Icon(
-                                    Icons.calendar_today_outlined,
-                                    size: 12,
-                                    color: Color(0xFF666666),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Expanded(
-                                    child: Text(
-                                      _formatDateTime(stat.modified),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      filename,
                                       style: const TextStyle(
-                                        color: Color(0xFF666666),
-                                        fontSize: 12,
+                                        color: Colors.white,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
                                       ),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(height: 4),
+                                    Row(
+                                      children: [
+                                        const Icon(
+                                          Icons.calendar_today_outlined,
+                                          size: 12,
+                                          color: Color(0xFF666666),
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Expanded(
+                                          child: Text(
+                                            _formatDateTime(stat.modified),
+                                            style: const TextStyle(
+                                              color: Color(0xFF666666),
+                                              fontSize: 12,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              IconButton(
+                                icon: Icon(
+                                  isSelected
+                                      ? Icons.keyboard_arrow_up
+                                      : Icons.keyboard_arrow_down,
+                                  color: const Color(0xFFD4AF37),
+                                  size: 28,
+                                ),
+                                onPressed: () => _selectRecording(file.path),
+                                constraints: const BoxConstraints(),
+                                padding: const EdgeInsets.all(8),
+                              ),
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.delete_outline,
+                                  color: Colors.redAccent,
+                                  size: 24,
+                                ),
+                                onPressed: () {
+                                  showDialog(
+                                    context: context,
+                                    builder: (context) => AlertDialog(
+                                      backgroundColor: const Color(0xFF1C1C1C),
+                                      title: const Text('Delete Recording?'),
+                                      content: const Text(
+                                        'Are you sure you want to delete this recording?',
+                                        style: TextStyle(color: Colors.white70),
+                                      ),
+                                      actions: [
+                                        TextButton(
+                                          child: const Text(
+                                            'CANCEL',
+                                            style: TextStyle(
+                                              color: Color(0xFF666666),
+                                            ),
+                                          ),
+                                          onPressed: () =>
+                                              Navigator.pop(context),
+                                        ),
+                                        TextButton(
+                                          child: const Text(
+                                            'DELETE',
+                                            style: TextStyle(
+                                              color: Colors.redAccent,
+                                            ),
+                                          ),
+                                          onPressed: () {
+                                            Navigator.pop(context);
+                                            _deleteRecording(file.path);
+                                          },
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
                               ),
                             ],
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        Wrap(
-                          spacing: -8,
-                          children: [
-                            if (!filename.contains('_processed') &&
-                                filename.endsWith('.wav'))
-                              IconButton(
-                                icon: _isProcessingAudioFile
-                                    ? const SizedBox(
-                                        width: 16,
-                                        height: 16,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          color: Color(0xFFD4AF37),
+                        if (isSelected) ...[
+                          const SizedBox(height: 14),
+                          const Divider(color: Color(0xFF333333), height: 1),
+                          const SizedBox(height: 14),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _buildDemoPlaybackButton(
+                                  label: 'Original',
+                                  icon: isOriginalPlaying
+                                      ? Icons.pause
+                                      : Icons.play_arrow,
+                                  active: isOriginalPlaying,
+                                  onPressed: () =>
+                                      _toggleDemoPlayback(amplified: false),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: _buildDemoPlaybackButton(
+                                  label: _isPreparingDemoPlayback
+                                      ? 'Preparing'
+                                      : 'Amplified',
+                                  icon: isAmplifiedPlaying
+                                      ? Icons.pause
+                                      : Icons.hearing,
+                                  active: isAmplifiedPlaying,
+                                  onPressed: _isPreparingDemoPlayback
+                                      ? null
+                                      : () => _toggleDemoPlayback(
+                                          amplified: true,
                                         ),
-                                      )
-                                    : const Icon(
-                                        Icons.auto_fix_high,
-                                        color: Color(0xFFD4AF37),
-                                      ),
-                                onPressed: _isProcessingAudioFile
-                                    ? null
-                                    : () => _processAudioFile(file.path),
-                                tooltip: 'Process Audio',
-                                constraints: const BoxConstraints(),
-                                padding: const EdgeInsets.all(8),
+                                ),
                               ),
-                            IconButton(
-                              icon: Icon(
-                                isCurrentlyPlaying && _isPlaying
-                                    ? Icons.pause_circle_filled
-                                    : Icons.play_circle_fill,
-                                color: const Color(0xFFD4AF37),
-                                size: 28,
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          Container(
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF282828),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: const Color(0xFF333333),
                               ),
-                              onPressed: () => _togglePlayback(file.path),
-                              constraints: const BoxConstraints(),
-                              padding: const EdgeInsets.all(8),
                             ),
-                            IconButton(
-                              icon: const Icon(
-                                Icons.delete_outline,
-                                color: Colors.redAccent,
-                                size: 24,
-                              ),
-                              onPressed: () {
-                                showDialog(
-                                  context: context,
-                                  builder: (context) => AlertDialog(
-                                    backgroundColor: const Color(0xFF1C1C1C),
-                                    title: const Text('Delete Recording?'),
-                                    content: const Text(
-                                      'Are you sure you want to delete this recording?',
-                                      style: TextStyle(color: Colors.white70),
-                                    ),
-                                    actions: [
-                                      TextButton(
-                                        child: const Text(
-                                          'CANCEL',
-                                          style: TextStyle(
-                                            color: Color(0xFF666666),
-                                          ),
-                                        ),
-                                        onPressed: () => Navigator.pop(context),
-                                      ),
-                                      TextButton(
-                                        child: const Text(
-                                          'DELETE',
-                                          style: TextStyle(
-                                            color: Colors.redAccent,
-                                          ),
-                                        ),
-                                        onPressed: () {
-                                          Navigator.pop(context);
-                                          _deleteRecording(file.path);
-                                        },
-                                      ),
-                                    ],
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: _buildDemoModeButton(
+                                    label: 'Broadband',
+                                    selected: _demoBroadbandMode,
+                                    onTap: () => _onDemoModeChanged(true),
                                   ),
-                                );
-                              },
+                                ),
+                                Expanded(
+                                  child: _buildDemoModeButton(
+                                    label: 'Multiband',
+                                    selected: !_demoBroadbandMode,
+                                    onTap: () => _onDemoModeChanged(false),
+                                  ),
+                                ),
+                              ],
                             ),
-                          ],
-                        ),
+                          ),
+                          const SizedBox(height: 16),
+                          ...List.generate(_rtBandLabels.length, (bandIndex) {
+                            return _buildDemoGainSlider(bandIndex);
+                          }),
+                        ],
                       ],
                     ),
                   ),
                 );
               },
             ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDemoPlaybackButton({
+    required String label,
+    required IconData icon,
+    required bool active,
+    required VoidCallback? onPressed,
+  }) {
+    return OutlinedButton.icon(
+      onPressed: onPressed,
+      icon: Icon(icon, size: 18),
+      label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: active ? Colors.black : const Color(0xFFD4AF37),
+        backgroundColor: active ? const Color(0xFFD4AF37) : Colors.transparent,
+        side: const BorderSide(color: Color(0xFFD4AF37)),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
+    );
+  }
+
+  Widget _buildDemoModeButton({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(vertical: 11),
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xFFD4AF37) : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: selected ? Colors.black : Colors.white70,
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.6,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDemoGainSlider(int index) {
+    final value = _demoLosses[index];
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 78,
+            child: Text(
+              _rtBandLabels[index],
+              style: const TextStyle(color: Colors.white70, fontSize: 11),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          Expanded(
+            child: SliderTheme(
+              data: SliderThemeData(
+                activeTrackColor: const Color(0xFFD4AF37),
+                inactiveTrackColor: const Color(0xFF444444),
+                thumbColor: const Color(0xFFD4AF37),
+                overlayColor: const Color(0xFFD4AF37).withValues(alpha: 0.15),
+                trackHeight: 3,
+              ),
+              child: Slider(
+                value: value,
+                min: 0,
+                max: 60,
+                divisions: 60,
+                label: '${value.round()} dB',
+                onChanged: (newValue) => _onDemoLossChanged(index, newValue),
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 46,
+            child: Text(
+              '${value.round()} dB',
+              textAlign: TextAlign.right,
+              style: const TextStyle(
+                color: Color(0xFFD4AF37),
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -1245,7 +1489,7 @@ class _AmplificationScreenState extends State<AmplificationScreen>
                                 ),
                                 Switch(
                                   value: _envDetectEnabled,
-                                  activeColor: const Color(0xFFD4AF37),
+                                  activeThumbColor: const Color(0xFFD4AF37),
                                   onChanged: (value) =>
                                       _toggleEnvDetection(value),
                                 ),
@@ -1533,8 +1777,9 @@ class _AmplificationScreenState extends State<AmplificationScreen>
                             onChanged: _envDetectEnabled
                                 ? null
                                 : (value) {
-                                    if (value != null)
+                                    if (value != null) {
                                       _onEnvironmentModeChanged(value);
+                                    }
                                   },
                           ),
                         ),
@@ -1577,7 +1822,7 @@ class _AmplificationScreenState extends State<AmplificationScreen>
                               ),
                               Switch(
                                 value: _expanderEnabled,
-                                activeColor: const Color(0xFFD4AF37),
+                                activeThumbColor: const Color(0xFFD4AF37),
                                 onChanged: (value) {
                                   setState(() => _expanderEnabled = value);
                                   _audioEngine.setExpanderEnabled(value);
@@ -1638,7 +1883,7 @@ class _AmplificationScreenState extends State<AmplificationScreen>
                             ),
                             Switch(
                               value: _isCommunicationMode,
-                              activeColor: const Color(0xFFD4AF37),
+                              activeThumbColor: const Color(0xFFD4AF37),
                               onChanged: _isRtStreaming
                                   ? null
                                   : (value) {
