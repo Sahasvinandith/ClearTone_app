@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'home_screen.dart';
 import 'amplification_screen.dart';
 import 'profile_tab_screen.dart';
+import 'profile_selection_screen.dart';
 import 'stt_tts_screen.dart';
 
 import '../models/profile.dart';
@@ -24,11 +25,20 @@ class _HomeWrapperState extends State<HomeWrapper> {
     });
   }
 
+  void _openProfileSelection() {
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) => const ProfileSelectionScreen()),
+    );
+  }
+
   late final List<Widget> _screens = [
     HomeScreen(
       profile: widget.profile,
       onOpenTools: () => _openTab(1),
       onOpenAmplification: () => _openTab(2),
+      onOpenProfileTab: () => _openTab(3),
+      onOpenProfileSelection: _openProfileSelection,
     ),
     const SttTtsScreen(),
     AmplificationScreen(profile: widget.profile),

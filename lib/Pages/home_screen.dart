@@ -1,18 +1,23 @@
 import 'package:flutter/material.dart';
 
 import '../amplification_status.dart';
+import '../audio_generator.dart';
 import '../models/profile.dart';
 
 class HomeScreen extends StatelessWidget {
   final Profile profile;
   final VoidCallback onOpenTools;
   final VoidCallback onOpenAmplification;
+  final VoidCallback onOpenProfileTab;
+  final VoidCallback onOpenProfileSelection;
 
   const HomeScreen({
     super.key,
     required this.profile,
     required this.onOpenTools,
     required this.onOpenAmplification,
+    required this.onOpenProfileTab,
+    required this.onOpenProfileSelection,
   });
 
   @override
@@ -30,6 +35,12 @@ class HomeScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  _TopActions(
+                    compact: compact,
+                    onOpenProfileTab: onOpenProfileTab,
+                    onOpenProfileSelection: onOpenProfileSelection,
+                  ),
+                  SizedBox(height: compact ? 8 : 12),
                   _Header(name: profile.name, compact: compact),
                   SizedBox(height: gap),
                   _AmplificationTile(
@@ -43,6 +54,249 @@ class HomeScreen extends StatelessWidget {
             );
           },
         ),
+      ),
+    );
+  }
+}
+
+class _TopActions extends StatelessWidget {
+  final bool compact;
+  final VoidCallback onOpenProfileTab;
+  final VoidCallback onOpenProfileSelection;
+
+  const _TopActions({
+    required this.compact,
+    required this.onOpenProfileTab,
+    required this.onOpenProfileSelection,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: compact ? 42 : 48,
+      child: Row(
+        children: [
+          _HeaderIconButton(
+            icon: Icons.earbuds_battery_outlined,
+            label: compact ? null : 'TEST BUDS',
+            tooltip: 'Test earbuds',
+            onTap: () => _showEarbudTestDialog(context),
+          ),
+          const Spacer(),
+          PopupMenuButton<_ProfileAction>(
+            tooltip: 'Profile options',
+            color: const Color(0xFF1C1C1C),
+            offset: const Offset(0, 46),
+            onSelected: (action) {
+              switch (action) {
+                case _ProfileAction.profileTab:
+                  onOpenProfileTab();
+                case _ProfileAction.profileSelection:
+                  onOpenProfileSelection();
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: _ProfileAction.profileTab,
+                child: _ProfileMenuItem(
+                  icon: Icons.person_outline,
+                  label: 'PROFILE TAB',
+                ),
+              ),
+              PopupMenuItem(
+                value: _ProfileAction.profileSelection,
+                child: _ProfileMenuItem(
+                  icon: Icons.switch_account_outlined,
+                  label: 'SELECT PROFILE',
+                ),
+              ),
+            ],
+            child: _HeaderIconButton(
+              icon: Icons.account_circle_outlined,
+              label: compact ? null : 'PROFILE',
+              tooltip: 'Profile options',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showEarbudTestDialog(BuildContext context) async {
+    final audioGenerator = AudioGenerator();
+
+    Future<void> playTestTone(String channel) async {
+      try {
+        await audioGenerator.stopTone();
+        await audioGenerator.playTone(
+          frequency: 1000,
+          amplitude: 45,
+          channel: channel,
+          duration: 1200,
+        );
+      } catch (_) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not play earbud test tone.')),
+        );
+      }
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('TEST EARBUDS'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Play a short tone through each earbud.',
+                style: TextStyle(color: Color(0xFF9A9A9A), fontSize: 13),
+              ),
+              const SizedBox(height: 18),
+              Row(
+                children: [
+                  Expanded(
+                    child: _EarTestButton(
+                      icon: Icons.hearing,
+                      label: 'LEFT EAR',
+                      onPressed: () => playTestTone('left'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _EarTestButton(
+                      icon: Icons.hearing,
+                      label: 'RIGHT EAR',
+                      onPressed: () => playTestTone('right'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                audioGenerator.stopTone();
+                Navigator.of(dialogContext).pop();
+              },
+              child: const Text('CLOSE'),
+            ),
+          ],
+        );
+      },
+    );
+
+    await audioGenerator.stopTone();
+  }
+}
+
+enum _ProfileAction { profileTab, profileSelection }
+
+class _HeaderIconButton extends StatelessWidget {
+  final IconData icon;
+  final String? label;
+  final String tooltip;
+  final VoidCallback? onTap;
+
+  const _HeaderIconButton({
+    required this.icon,
+    required this.tooltip,
+    this.label,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final content = Container(
+      height: 42,
+      padding: EdgeInsets.symmetric(horizontal: label == null ? 11 : 13),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1C1C1C),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF2A2A2A)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: const Color(0xFFD4AF37), size: 21),
+          if (label != null) ...[
+            const SizedBox(width: 8),
+            Text(
+              label!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.8,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: content,
+      ),
+    );
+  }
+}
+
+class _ProfileMenuItem extends StatelessWidget {
+  final IconData icon;
+  final String label;
+
+  const _ProfileMenuItem({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, color: const Color(0xFFD4AF37), size: 19),
+        const SizedBox(width: 12),
+        Text(
+          label,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.8,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _EarTestButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onPressed;
+
+  const _EarTestButton({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton.icon(
+      onPressed: onPressed,
+      icon: Icon(icon, size: 18),
+      label: FittedBox(fit: BoxFit.scaleDown, child: Text(label)),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: const Color(0xFFD4AF37),
+        side: const BorderSide(color: Color(0xFF3A3A3A)),
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
       ),
     );
   }
