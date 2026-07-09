@@ -601,7 +601,7 @@ class _ModePicker extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           _ModeButton(
-            label: 'Transport',
+            label: 'Transit',
             color: const Color(0xFFFFA24A),
             mode: 1,
             status: status,

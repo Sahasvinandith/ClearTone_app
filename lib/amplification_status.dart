@@ -42,7 +42,7 @@ class AmplificationStatus {
   String get modeLabel {
     switch (mode) {
       case 1:
-        return 'Transportation';
+        return 'Transit';
       case 2:
         return 'Conversation';
       default:

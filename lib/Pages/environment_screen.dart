@@ -160,7 +160,7 @@ class _EnvironmentScreenState extends State<EnvironmentScreen>
       case 'Conversation':
         return Icons.record_voice_over;
       case 'Silence':
-        return Icons.volume_off_outlined;
+        return Icons.graphic_eq;
       case 'Initializing':
         return Icons.hourglass_empty_outlined;
       default:
@@ -171,15 +171,26 @@ class _EnvironmentScreenState extends State<EnvironmentScreen>
   Color _colorForMode(String mode) {
     switch (mode) {
       case 'Transportation':
-        return const Color(0xFF4FC3F7);
+        return const Color(0xFFFFA24A);
       case 'Conversation':
         return const Color(0xFF81C784);
       case 'Silence':
-        return const Color(0xFF666666);
+        return const Color(0xFF6CA8FF);
       case 'Initializing':
         return const Color(0xFF666666);
       default:
         return const Color(0xFFD4AF37);
+    }
+  }
+
+  String _displayLabelForMode(String mode) {
+    switch (mode) {
+      case 'Silence':
+        return 'Standard';
+      case 'Transportation':
+        return 'Transit';
+      default:
+        return mode;
     }
   }
 
@@ -263,7 +274,7 @@ class _EnvironmentScreenState extends State<EnvironmentScreen>
                       const SizedBox(height: 20),
 
                       Text(
-                        _latest.mode.toUpperCase(),
+                        _displayLabelForMode(_latest.mode).toUpperCase(),
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           color: modeColor,

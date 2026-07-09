@@ -396,10 +396,21 @@ class _AmplificationScreenState extends State<AmplificationScreen>
     }
   }
 
+  String _environmentDisplayLabel(String environment) {
+    switch (environment) {
+      case 'Silence':
+        return 'Standard';
+      case 'Transportation':
+        return 'Transit';
+      default:
+        return environment;
+    }
+  }
+
   Map<String, Object> get _overlayPayload => {
     'mode': _overlayModeLabel,
     'autoDetectEnabled': _envDetectEnabled,
-    'detectedEnvironment': _detectedEnvironment,
+    'detectedEnvironment': _environmentDisplayLabel(_detectedEnvironment),
     'confidence': _detectedConfidence,
   };
 
@@ -1665,7 +1676,9 @@ class _AmplificationScreenState extends State<AmplificationScreen>
                                   Text(
                                     _detectedEnvironment.isEmpty
                                         ? 'Waiting for data...'
-                                        : _detectedEnvironment,
+                                        : _environmentDisplayLabel(
+                                            _detectedEnvironment,
+                                          ),
                                     style: const TextStyle(
                                       color: Colors.white70,
                                       fontSize: 13,
