@@ -5,6 +5,7 @@ import android.media.AudioTrack
 import android.media.MediaPlayer
 import android.media.AudioManager
 import android.media.AudioDeviceInfo
+import android.content.Intent
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.os.Build
@@ -108,9 +109,40 @@ class MainActivity : FlutterActivity() {
                     stopTextOnPhoneSpeaker()
                     result.success(null)
                 }
+                "startAmplificationForegroundService" -> {
+                    try {
+                        startAmplificationForegroundService()
+                        result.success(null)
+                    } catch (e: Exception) {
+                        Log.e("MainActivity", "Failed to start amplification foreground service", e)
+                        result.error("FOREGROUND_SERVICE_ERROR", e.message, null)
+                    }
+                }
+                "stopAmplificationForegroundService" -> {
+                    try {
+                        stopAmplificationForegroundService()
+                        result.success(null)
+                    } catch (e: Exception) {
+                        Log.e("MainActivity", "Failed to stop amplification foreground service", e)
+                        result.error("FOREGROUND_SERVICE_ERROR", e.message, null)
+                    }
+                }
                 else -> result.notImplemented()
             }
         }
+    }
+
+    private fun startAmplificationForegroundService() {
+        val intent = Intent(this, AmplificationForegroundService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+    }
+
+    private fun stopAmplificationForegroundService() {
+        stopService(Intent(this, AmplificationForegroundService::class.java))
     }
 
     private fun getAudioInputDevices(): List<Map<String, Any>> {

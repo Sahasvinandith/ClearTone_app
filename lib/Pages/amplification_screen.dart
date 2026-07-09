@@ -126,6 +126,9 @@ class _AmplificationScreenState extends State<AmplificationScreen>
     _reconnectTimer?.cancel();
     if (_isRtStreaming) {
       _audioEngine.stopRtStream();
+      _stopAmplificationForegroundService();
+      amplificationStatusNotifier.value = amplificationStatusNotifier.value
+          .copyWith(isStreaming: false);
     }
     _envSub?.cancel();
     _conversationHoldTimer?.cancel();
@@ -370,9 +373,32 @@ class _AmplificationScreenState extends State<AmplificationScreen>
     await _toggleRtStream();
   }
 
+  Future<void> _requestAmplificationNotificationPermission() async {
+    if (!Platform.isAndroid) return;
+    final status = await Permission.notification.status;
+    if (status.isDenied || status.isRestricted || status.isLimited) {
+      await Permission.notification.request();
+    }
+  }
+
+  Future<void> _startAmplificationForegroundService() async {
+    if (!Platform.isAndroid) return;
+    await _audioChannel.invokeMethod('startAmplificationForegroundService');
+  }
+
+  Future<void> _stopAmplificationForegroundService() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _audioChannel.invokeMethod('stopAmplificationForegroundService');
+    } catch (e) {
+      debugPrint("Error stopping amplification foreground service: $e");
+    }
+  }
+
   Future<void> _toggleRtStream() async {
     if (_isRtStreaming) {
       _audioEngine.stopRtStream();
+      await _stopAmplificationForegroundService();
       if (_envDetectEnabled) {
         await _toggleEnvDetection(false);
       }
@@ -403,6 +429,8 @@ class _AmplificationScreenState extends State<AmplificationScreen>
         );
         return;
       }
+
+      await _requestAmplificationNotificationPermission();
 
       // 1. Enable Bluetooth SCO only when the selected device is a BT SCO
       //    device (TYPE_BLUETOOTH_SCO = 7). When the user picks the built-in
@@ -440,11 +468,30 @@ class _AmplificationScreenState extends State<AmplificationScreen>
       int result = _audioEngine.startRtStream(_selectedDeviceId!);
       debugPrint("Result: $result");
       if (result == 0) {
-        _audioEngine.updateRtParams(_rtLosses);
-        setState(() {
-          _isRtStreaming = true;
-        });
-        _publishAmplificationStatus();
+        try {
+          await _startAmplificationForegroundService();
+          if (!mounted) {
+            _audioEngine.stopRtStream();
+            await _stopAmplificationForegroundService();
+            return;
+          }
+          _audioEngine.updateRtParams(_rtLosses);
+          setState(() {
+            _isRtStreaming = true;
+          });
+          _publishAmplificationStatus();
+        } catch (e) {
+          _audioEngine.stopRtStream();
+          await _stopAmplificationForegroundService();
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Amplification started, but background mode could not be enabled: $e',
+              ),
+            ),
+          );
+        }
       } else {
         if (!mounted) return;
         // ... (rest of error handling)
