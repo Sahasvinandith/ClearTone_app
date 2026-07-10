@@ -50,6 +50,8 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
   int _environmentMode = 0; // 0=Standard, 1=Transit, 2=Conversation
   bool _expanderEnabled =
       true; // Conversation Mode suppression diagnostic toggle
+  bool _isMeasuringLatency = false;
+  double? _lastLatencyMs;
   Timer? _reconnectTimer;
 
   // --- Environment Auto-Detection State ---
@@ -131,6 +133,7 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
     _envSub?.cancel();
     _conversationHoldTimer?.cancel();
     _demoProcessDebounce?.cancel();
+    _audioEngine.stopLatencyProbe();
     _envDetector?.stop().then((_) => _envDetector?.dispose());
     _envSilenceThresholdController.dispose();
     _audioRecorder.dispose();
@@ -491,6 +494,7 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
   Future<void> _toggleRtStream() async {
     if (_isRtStreaming) {
       _audioEngine.stopRtStream();
+      _audioEngine.stopLatencyProbe();
       await _stopAmplificationForegroundService();
       await _hideAmplificationOverlay(resetDismissed: true);
       if (_envDetectEnabled) {
@@ -514,6 +518,7 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
       }
       setState(() {
         _isRtStreaming = false;
+        _isMeasuringLatency = false;
       });
       _publishAmplificationStatus();
     } else {
@@ -734,6 +739,84 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
         context,
       ).showSnackBar(SnackBar(content: Text('Verification error: $e')));
     }
+  }
+
+  Future<void> _measureRtLatency() async {
+    if (!_isRtStreaming) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Start streaming first to measure latency.'),
+        ),
+      );
+      return;
+    }
+    if (_isMeasuringLatency) return;
+
+    final double triggerThreshold = _envSilenceThreshold
+        .clamp(0.0001, 1.0)
+        .toDouble();
+    setState(() {
+      _isMeasuringLatency = true;
+      _lastLatencyMs = null;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Latency probe armed. Play a loud sound above ${triggerThreshold.toStringAsFixed(4)}.',
+        ),
+      ),
+    );
+
+    _audioEngine.startLatencyProbe(triggerThreshold);
+    const int pollMs = 50;
+    const int timeoutMs = 5000;
+    int elapsedMs = 0;
+
+    while (mounted && elapsedMs < timeoutMs) {
+      await Future.delayed(const Duration(milliseconds: pollMs));
+      elapsedMs += pollMs;
+
+      final status = _audioEngine.getLatencyProbeStatus();
+      if (status == 1) {
+        final latencyMs = _audioEngine.getLatencyProbeMs();
+        if (!mounted) return;
+        setState(() {
+          _isMeasuringLatency = false;
+          _lastLatencyMs = latencyMs;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Measured latency: ${latencyMs.toStringAsFixed(2)} ms',
+            ),
+          ),
+        );
+        return;
+      }
+      if (status == -2) {
+        _audioEngine.stopLatencyProbe();
+        if (!mounted) return;
+        setState(() => _isMeasuringLatency = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Latency probe failed: stream timestamp unavailable.',
+            ),
+          ),
+        );
+        return;
+      }
+    }
+
+    _audioEngine.stopLatencyProbe();
+    if (!mounted) return;
+    setState(() => _isMeasuringLatency = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Latency probe timed out. Try a louder, sharper sound.'),
+      ),
+    );
   }
 
   // --- Record Methods ---
@@ -2118,6 +2201,41 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
                     ),
                   ),
                 ),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: _isRtStreaming && !_isMeasuringLatency
+                      ? _measureRtLatency
+                      : null,
+                  icon: Icon(
+                    _isMeasuringLatency ? Icons.graphic_eq : Icons.speed,
+                    size: 18,
+                  ),
+                  label: Text(
+                    _isMeasuringLatency
+                        ? 'LISTENING FOR LOUD TEST SOUND'
+                        : 'MEASURE LATENCY',
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFFD4AF37),
+                    disabledForegroundColor: const Color(0xFF666666),
+                    side: BorderSide(
+                      color: _isRtStreaming
+                          ? const Color(0xFFD4AF37)
+                          : const Color(0xFF333333),
+                    ),
+                  ),
+                ),
+                if (_lastLatencyMs != null) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    'Last latency: ${_lastLatencyMs!.toStringAsFixed(2)} ms',
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),

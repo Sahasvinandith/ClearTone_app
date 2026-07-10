@@ -8,6 +8,7 @@
 #include <fstream>
 #include <mutex>
 #include <string>
+#include <time.h>
 #include <vector>
 
 #define LOG_TAG "ClearToneEngine"
@@ -518,6 +519,20 @@ public:
     int32_t             currentDeviceId_ = 0;
     EnvironmentMode     currentMode_ = MODE_STANDARD;
     std::atomic<int32_t> inputSampleRate_{0};
+    std::atomic<int64_t> inputFramesRead_{0};
+    std::atomic<int64_t> outputFramesWritten_{0};
+
+    struct LatencyProbe {
+        std::atomic<bool> armed{false};
+        std::atomic<int32_t> status{0}; // 0 idle/armed, 1 measured, -1 timed out, -2 timestamp unavailable
+        std::atomic<int64_t> armedOutputFrame{0};
+        std::atomic<int64_t> inputFrame{-1};
+        std::atomic<int64_t> outputFrame{-1};
+        std::atomic<int64_t> inputTimeNs{0};
+        std::atomic<int64_t> outputTimeNs{0};
+        std::atomic<double> latencyMs{0.0};
+        std::atomic<float> threshold{0.05f};
+    } latencyProbe_;
 
     // Raw mic frames for environment detection. This is a single-producer
     // audio-callback / single-consumer FFI drain buffer.
@@ -543,10 +558,16 @@ public:
             auto res = inputStream_->read(out, numFrames, 0 /*timeoutNs*/);
             got = (res) ? res.value() : 0;
         }
+        const int64_t inputStartFrame =
+                inputFramesRead_.fetch_add(got, std::memory_order_relaxed);
+        const int64_t outputStartFrame =
+                outputFramesWritten_.load(std::memory_order_relaxed);
         // Feed environment detection only real input frames. The output path
         // still pads short reads with silence, but classifier timing should not
         // be polluted by Oboe startup/read underrun zeros.
         if (got > 0) pushRawInput(out, got);
+
+        LatencyProbeSnapshot probe = inspectLatencyProbeInput(out, got, inputStartFrame);
 
         if (got < numFrames)
             std::memset(out + got, 0, (numFrames - got) * sizeof(float));
@@ -561,6 +582,9 @@ public:
         for (int i = 0; i < numFrames; i++) {
             out[i] = proc_.process(out[i]);
         }
+
+        inspectLatencyProbeOutput(out, numFrames, outputStartFrame, probe);
+        outputFramesWritten_.fetch_add(numFrames, std::memory_order_relaxed);
 
         // Lock once per callback for output capture
         if (cap) {
@@ -621,6 +645,9 @@ public:
         }
         outputStream_->setBufferSizeInFrames(outputStream_->getFramesPerBurst() * 2);
 
+        inputFramesRead_.store(0, std::memory_order_relaxed);
+        outputFramesWritten_.store(0, std::memory_order_relaxed);
+
         inputStream_->requestStart();
         outputStream_->requestStart();
         running_ = true;
@@ -637,6 +664,7 @@ public:
         if (inputStream_)  inputStream_->requestStop();
         running_ = false;
         inputSampleRate_.store(0, std::memory_order_relaxed);
+        latencyProbe_.armed.store(false, std::memory_order_relaxed);
         clearRawInput();
         LOGI("Streams stopped.");
         return 0;
@@ -672,7 +700,44 @@ public:
         clearRawInput();
     }
 
+    void startLatencyProbe(float threshold) {
+        latencyProbe_.threshold.store(clampf(threshold, 0.0001f, 1.f),
+                                      std::memory_order_relaxed);
+        latencyProbe_.status.store(0, std::memory_order_relaxed);
+        latencyProbe_.inputFrame.store(-1, std::memory_order_relaxed);
+        latencyProbe_.outputFrame.store(-1, std::memory_order_relaxed);
+        latencyProbe_.inputTimeNs.store(0, std::memory_order_relaxed);
+        latencyProbe_.outputTimeNs.store(0, std::memory_order_relaxed);
+        latencyProbe_.latencyMs.store(0.0, std::memory_order_relaxed);
+        latencyProbe_.armedOutputFrame.store(
+                outputFramesWritten_.load(std::memory_order_relaxed),
+                std::memory_order_relaxed);
+        latencyProbe_.armed.store(true, std::memory_order_release);
+    }
+
+    void stopLatencyProbe() {
+        latencyProbe_.armed.store(false, std::memory_order_release);
+        if (latencyProbe_.status.load(std::memory_order_relaxed) == 0) {
+            latencyProbe_.status.store(-1, std::memory_order_relaxed);
+        }
+    }
+
+    double getLatencyProbeMs() const {
+        if (latencyProbe_.status.load(std::memory_order_relaxed) != 1) return -1.0;
+        return latencyProbe_.latencyMs.load(std::memory_order_relaxed);
+    }
+
+    int32_t getLatencyProbeStatus() const {
+        return latencyProbe_.status.load(std::memory_order_relaxed);
+    }
+
 private:
+    struct LatencyProbeSnapshot {
+        bool found = false;
+        int64_t inputFrame = -1;
+        int64_t inputTimeNs = 0;
+    };
+
     void configureRawInputBuffer(int32_t sampleRate) {
         std::lock_guard<std::mutex> lk(rawInputMu_);
         inputSampleRate_.store(sampleRate, std::memory_order_relaxed);
@@ -702,6 +767,82 @@ private:
             } else {
                 rawInputCount_++;
             }
+        }
+    }
+
+    int64_t frameTimeNs(oboe::AudioStream* stream, int64_t frameIndex) const {
+        if (stream == nullptr) return 0;
+        auto ts = stream->getTimestamp(CLOCK_MONOTONIC);
+        if (!ts) return 0;
+        const int32_t sampleRate = stream->getSampleRate();
+        if (sampleRate <= 0) return 0;
+        const int64_t deltaFrames = frameIndex - ts.value().position;
+        const double deltaNs = (double)deltaFrames * 1000000000.0 / (double)sampleRate;
+        return ts.value().timestamp + (int64_t)std::llround(deltaNs);
+    }
+
+    LatencyProbeSnapshot inspectLatencyProbeInput(
+            const float* samples,
+            int32_t numFrames,
+            int64_t inputStartFrame) {
+        LatencyProbeSnapshot snapshot;
+        if (!latencyProbe_.armed.load(std::memory_order_acquire) || numFrames <= 0) {
+            return snapshot;
+        }
+        if (latencyProbe_.inputFrame.load(std::memory_order_relaxed) >= 0) {
+            snapshot.found = true;
+            snapshot.inputFrame = latencyProbe_.inputFrame.load(std::memory_order_relaxed);
+            snapshot.inputTimeNs = latencyProbe_.inputTimeNs.load(std::memory_order_relaxed);
+            return snapshot;
+        }
+
+        const float threshold = latencyProbe_.threshold.load(std::memory_order_relaxed);
+        for (int32_t i = 0; i < numFrames; i++) {
+            if (std::fabs(samples[i]) >= threshold) {
+                const int64_t frame = inputStartFrame + i;
+                const int64_t timeNs = frameTimeNs(inputStream_.get(), frame);
+                latencyProbe_.inputFrame.store(frame, std::memory_order_relaxed);
+                latencyProbe_.inputTimeNs.store(timeNs, std::memory_order_relaxed);
+                snapshot.found = true;
+                snapshot.inputFrame = frame;
+                snapshot.inputTimeNs = timeNs;
+                break;
+            }
+        }
+        return snapshot;
+    }
+
+    void inspectLatencyProbeOutput(
+            const float* samples,
+            int32_t numFrames,
+            int64_t outputStartFrame,
+            const LatencyProbeSnapshot& probe) {
+        if (!latencyProbe_.armed.load(std::memory_order_acquire) || !probe.found) {
+            return;
+        }
+        if (latencyProbe_.status.load(std::memory_order_relaxed) != 0) return;
+
+        const float threshold = latencyProbe_.threshold.load(std::memory_order_relaxed);
+        const int64_t armedFrame =
+                latencyProbe_.armedOutputFrame.load(std::memory_order_relaxed);
+        for (int32_t i = 0; i < numFrames; i++) {
+            const int64_t outputFrame = outputStartFrame + i;
+            if (outputFrame < armedFrame) continue;
+            if (std::fabs(samples[i]) < threshold) continue;
+
+            const int64_t outputTimeNs = frameTimeNs(outputStream_.get(), outputFrame);
+            if (probe.inputTimeNs == 0 || outputTimeNs == 0) {
+                latencyProbe_.status.store(-2, std::memory_order_relaxed);
+            } else {
+                const double latencyMs =
+                        (double)(outputTimeNs - probe.inputTimeNs) / 1000000.0;
+                latencyProbe_.outputFrame.store(outputFrame, std::memory_order_relaxed);
+                latencyProbe_.outputTimeNs.store(outputTimeNs, std::memory_order_relaxed);
+                latencyProbe_.latencyMs.store(latencyMs, std::memory_order_relaxed);
+                latencyProbe_.status.store(1, std::memory_order_relaxed);
+            }
+            latencyProbe_.armed.store(false, std::memory_order_release);
+            return;
         }
     }
 };
@@ -785,6 +926,22 @@ int32_t drain_rt_input_frames_ffi(float* out, int32_t maxFrames) {
 
 void clear_rt_input_frames_ffi() {
     gEngine.clearPendingRawInput();
+}
+
+void start_latency_probe_ffi(float threshold) {
+    gEngine.startLatencyProbe(threshold);
+}
+
+void stop_latency_probe_ffi() {
+    gEngine.stopLatencyProbe();
+}
+
+double get_latency_probe_ms_ffi() {
+    return gEngine.getLatencyProbeMs();
+}
+
+int32_t get_latency_probe_status_ffi() {
+    return gEngine.getLatencyProbeStatus();
 }
 
 void debug_start_capture_ffi() {

@@ -64,6 +64,18 @@ typedef _DrainRtInputFramesDart =
 typedef _ClearRtInputFramesC = Void Function();
 typedef _ClearRtInputFramesDart = void Function();
 
+typedef _StartLatencyProbeC = Void Function(Float threshold);
+typedef _StartLatencyProbeDart = void Function(double threshold);
+
+typedef _StopLatencyProbeC = Void Function();
+typedef _StopLatencyProbeDart = void Function();
+
+typedef _GetLatencyProbeMsC = Double Function();
+typedef _GetLatencyProbeMsDart = double Function();
+
+typedef _GetLatencyProbeStatusC = Int32 Function();
+typedef _GetLatencyProbeStatusDart = int Function();
+
 typedef _DebugStartCaptureC = Void Function();
 typedef _DebugStartCaptureDart = void Function();
 
@@ -102,6 +114,10 @@ class AudioEngineFFI {
   late final _GetRtInputSampleRateDart _getRtInputSampleRate;
   late final _DrainRtInputFramesDart _drainRtInputFrames;
   late final _ClearRtInputFramesDart _clearRtInputFrames;
+  late final _StartLatencyProbeDart _startLatencyProbe;
+  late final _StopLatencyProbeDart _stopLatencyProbe;
+  late final _GetLatencyProbeMsDart _getLatencyProbeMs;
+  late final _GetLatencyProbeStatusDart _getLatencyProbeStatus;
   late final _DebugStartCaptureDart _debugStartCapture;
   late final _DebugStopCaptureDart _debugStopCapture;
   late final _DebugSaveCaptureDart _debugSaveCapture;
@@ -159,6 +175,26 @@ class AudioEngineFFI {
     _clearRtInputFrames = _lib
         .lookupFunction<_ClearRtInputFramesC, _ClearRtInputFramesDart>(
           'clear_rt_input_frames_ffi',
+        );
+
+    _startLatencyProbe = _lib
+        .lookupFunction<_StartLatencyProbeC, _StartLatencyProbeDart>(
+          'start_latency_probe_ffi',
+        );
+
+    _stopLatencyProbe = _lib
+        .lookupFunction<_StopLatencyProbeC, _StopLatencyProbeDart>(
+          'stop_latency_probe_ffi',
+        );
+
+    _getLatencyProbeMs = _lib
+        .lookupFunction<_GetLatencyProbeMsC, _GetLatencyProbeMsDart>(
+          'get_latency_probe_ms_ffi',
+        );
+
+    _getLatencyProbeStatus = _lib
+        .lookupFunction<_GetLatencyProbeStatusC, _GetLatencyProbeStatusDart>(
+          'get_latency_probe_status_ffi',
         );
 
     _debugStartCapture = _lib
@@ -301,6 +337,26 @@ class AudioEngineFFI {
   /// Drops pending raw mic frames so a new detector starts from live audio.
   void clearRtInputFrames() {
     _clearRtInputFrames();
+  }
+
+  /// Arms a one-shot native latency probe. The probe detects the first input
+  /// and output samples whose absolute amplitude is at least [threshold].
+  void startLatencyProbe(double threshold) {
+    _startLatencyProbe(threshold);
+  }
+
+  void stopLatencyProbe() {
+    _stopLatencyProbe();
+  }
+
+  /// Returns measured latency in milliseconds, or -1 until a measurement exists.
+  double getLatencyProbeMs() {
+    return _getLatencyProbeMs();
+  }
+
+  /// 0 = waiting, 1 = measured, -1 = stopped/timed out, -2 = timestamp unavailable.
+  int getLatencyProbeStatus() {
+    return _getLatencyProbeStatus();
   }
 
   /// Starts capturing input audio samples for debugging.
