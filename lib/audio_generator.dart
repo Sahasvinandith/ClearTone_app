@@ -50,4 +50,19 @@ class AudioGenerator {
   Future<void> stopTone() async {
     await platform.invokeMethod('stopTone');
   }
+
+  Future<void> playLatencyChirp({
+    double amplitude = 76.0,
+    bool routeToSpeaker = true,
+  }) async {
+    try {
+      await platform.invokeMethod('playLatencyChirp', {
+        'amplitude': amplitude,
+        'routeToSpeaker': routeToSpeaker,
+      });
+    } catch (e) {
+      debugPrint('Error playing latency chirp: $e');
+      rethrow;
+    }
+  }
 }

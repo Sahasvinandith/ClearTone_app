@@ -8,6 +8,7 @@ import 'dart:io';
 import 'dart:async';
 import '../models/profile.dart';
 import '../audio_engine_ffi.dart';
+import '../audio_generator.dart';
 import '../services/environment_detector.dart';
 import '../amplification_status.dart';
 
@@ -25,6 +26,7 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
   AudioRecorder _audioRecorder = AudioRecorder();
   final AudioPlayer _audioPlayer = AudioPlayer();
   final AudioEngineFFI _audioEngine = AudioEngineFFI();
+  final AudioGenerator _audioGenerator = AudioGenerator();
   bool _isRecording = false;
   bool _hasPermission = false;
   List<FileSystemEntity> _recordings = [];
@@ -51,7 +53,11 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
   bool _expanderEnabled =
       true; // Conversation Mode suppression diagnostic toggle
   bool _isMeasuringLatency = false;
+  bool _isMeasuringChirpLatency = false;
   double? _lastLatencyMs;
+  double? _lastChirpLatencyMs;
+  double? _lastChirpInputScore;
+  double? _lastChirpOutputScore;
   Timer? _reconnectTimer;
 
   // --- Environment Auto-Detection State ---
@@ -134,6 +140,7 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
     _conversationHoldTimer?.cancel();
     _demoProcessDebounce?.cancel();
     _audioEngine.stopLatencyProbe();
+    unawaited(_audioGenerator.stopTone());
     _envDetector?.stop().then((_) => _envDetector?.dispose());
     _envSilenceThresholdController.dispose();
     _audioRecorder.dispose();
@@ -519,6 +526,7 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
       setState(() {
         _isRtStreaming = false;
         _isMeasuringLatency = false;
+        _isMeasuringChirpLatency = false;
       });
       _publishAmplificationStatus();
     } else {
@@ -817,6 +825,73 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
         content: Text('Latency probe timed out. Try a louder, sharper sound.'),
       ),
     );
+  }
+
+  Future<void> _measureChirpRtLatency() async {
+    if (!_isRtStreaming) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Start streaming first to measure chirp latency.'),
+        ),
+      );
+      return;
+    }
+    if (_isMeasuringLatency || _isMeasuringChirpLatency) return;
+
+    setState(() {
+      _isMeasuringChirpLatency = true;
+      _lastChirpLatencyMs = null;
+      _lastChirpInputScore = null;
+      _lastChirpOutputScore = null;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Chirp probe running. Keep the phone speaker near the mic.',
+        ),
+      ),
+    );
+
+    try {
+      _audioEngine.startChirpLatencyProbe(captureMs: 1000);
+      await Future.delayed(const Duration(milliseconds: 80));
+      await _audioGenerator.playLatencyChirp();
+      await Future.delayed(const Duration(milliseconds: 900));
+
+      final status = _audioEngine.stopChirpLatencyProbe();
+      final latencyMs = _audioEngine.getChirpLatencyMs();
+      final inputScore = _audioEngine.getChirpInputScore();
+      final outputScore = _audioEngine.getChirpOutputScore();
+
+      if (!mounted) return;
+      setState(() {
+        _isMeasuringChirpLatency = false;
+        _lastChirpInputScore = inputScore;
+        _lastChirpOutputScore = outputScore;
+        _lastChirpLatencyMs = status == 1 ? latencyMs : null;
+      });
+
+      final message = status == 1
+          ? 'Chirp latency: ${latencyMs.toStringAsFixed(2)} ms '
+                '(in ${inputScore.toStringAsFixed(2)}, out ${outputScore.toStringAsFixed(2)})'
+          : status == -2
+          ? 'Chirp probe failed: stream timestamp unavailable.'
+          : 'Chirp not matched confidently '
+                '(in ${inputScore.toStringAsFixed(2)}, out ${outputScore.toStringAsFixed(2)}).';
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    } catch (e) {
+      _audioEngine.stopChirpLatencyProbe();
+      if (!mounted) return;
+      setState(() => _isMeasuringChirpLatency = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Chirp latency error: $e')));
+    } finally {
+      unawaited(_audioGenerator.stopTone());
+    }
   }
 
   // --- Record Methods ---
@@ -2229,6 +2304,49 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
                   const SizedBox(height: 10),
                   Text(
                     'Last latency: ${_lastLatencyMs!.toStringAsFixed(2)} ms',
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed:
+                      _isRtStreaming &&
+                          !_isMeasuringLatency &&
+                          !_isMeasuringChirpLatency
+                      ? _measureChirpRtLatency
+                      : null,
+                  icon: Icon(
+                    _isMeasuringChirpLatency ? Icons.graphic_eq : Icons.radar,
+                    size: 18,
+                  ),
+                  label: Text(
+                    _isMeasuringChirpLatency
+                        ? 'MATCHING CHIRP SIGNAL'
+                        : 'MEASURE CHIRP LATENCY',
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFFD4AF37),
+                    disabledForegroundColor: const Color(0xFF666666),
+                    side: BorderSide(
+                      color: _isRtStreaming
+                          ? const Color(0xFFD4AF37)
+                          : const Color(0xFF333333),
+                    ),
+                  ),
+                ),
+                if (_lastChirpLatencyMs != null ||
+                    _lastChirpInputScore != null ||
+                    _lastChirpOutputScore != null) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    _lastChirpLatencyMs == null
+                        ? 'Chirp match: input ${(_lastChirpInputScore ?? 0).toStringAsFixed(2)}, output ${(_lastChirpOutputScore ?? 0).toStringAsFixed(2)}'
+                        : 'Chirp latency: ${_lastChirpLatencyMs!.toStringAsFixed(2)} ms  |  match ${(_lastChirpInputScore ?? 0).toStringAsFixed(2)} / ${(_lastChirpOutputScore ?? 0).toStringAsFixed(2)}',
+                    textAlign: TextAlign.center,
                     style: const TextStyle(
                       color: Colors.white70,
                       fontSize: 13,

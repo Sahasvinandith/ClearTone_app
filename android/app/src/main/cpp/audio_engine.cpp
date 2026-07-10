@@ -534,6 +534,25 @@ public:
         std::atomic<float> threshold{0.05f};
     } latencyProbe_;
 
+    struct ChirpLatencyProbe {
+        std::atomic<bool> capturing{false};
+        std::atomic<int32_t> status{0}; // 0 idle/capturing, 1 measured, -1 no match, -2 timestamp unavailable
+        std::vector<float> input;
+        std::vector<float> output;
+        std::mutex mu;
+        int32_t sampleRate = 48000;
+        int32_t maxFrames = 48000;
+        int64_t inputStartFrame = 0;
+        int64_t outputStartFrame = 0;
+        int64_t inputStartTimeNs = 0;
+        int64_t outputStartTimeNs = 0;
+        int32_t inputPeak = -1;
+        int32_t outputPeak = -1;
+        float inputScore = 0.f;
+        float outputScore = 0.f;
+        double latencyMs = 0.0;
+    } chirpProbe_;
+
     // Raw mic frames for environment detection. This is a single-producer
     // audio-callback / single-consumer FFI drain buffer.
     std::vector<float>  rawInputRing_;
@@ -568,6 +587,7 @@ public:
         if (got > 0) pushRawInput(out, got);
 
         LatencyProbeSnapshot probe = inspectLatencyProbeInput(out, got, inputStartFrame);
+        captureChirpProbeInput(out, got, inputStartFrame);
 
         if (got < numFrames)
             std::memset(out + got, 0, (numFrames - got) * sizeof(float));
@@ -584,6 +604,7 @@ public:
         }
 
         inspectLatencyProbeOutput(out, numFrames, outputStartFrame, probe);
+        captureChirpProbeOutput(out, numFrames, outputStartFrame);
         outputFramesWritten_.fetch_add(numFrames, std::memory_order_relaxed);
 
         // Lock once per callback for output capture
@@ -665,6 +686,7 @@ public:
         running_ = false;
         inputSampleRate_.store(0, std::memory_order_relaxed);
         latencyProbe_.armed.store(false, std::memory_order_relaxed);
+        chirpProbe_.capturing.store(false, std::memory_order_relaxed);
         clearRawInput();
         LOGI("Streams stopped.");
         return 0;
@@ -731,6 +753,58 @@ public:
         return latencyProbe_.status.load(std::memory_order_relaxed);
     }
 
+    void startChirpLatencyProbe(int32_t captureMs) {
+        const int32_t sr = getInputSampleRate() > 0 ? getInputSampleRate() : 48000;
+        const int32_t clampedMs = std::max(250, std::min(captureMs, 3000));
+        const int32_t maxFrames = std::max(1, (int32_t)((int64_t)sr * clampedMs / 1000));
+
+        std::lock_guard<std::mutex> lk(chirpProbe_.mu);
+        chirpProbe_.input.clear();
+        chirpProbe_.output.clear();
+        chirpProbe_.input.reserve((size_t)maxFrames);
+        chirpProbe_.output.reserve((size_t)maxFrames);
+        chirpProbe_.sampleRate = sr;
+        chirpProbe_.maxFrames = maxFrames;
+        chirpProbe_.inputStartFrame =
+                inputFramesRead_.load(std::memory_order_relaxed);
+        chirpProbe_.outputStartFrame =
+                outputFramesWritten_.load(std::memory_order_relaxed);
+        chirpProbe_.inputStartTimeNs =
+                frameTimeNs(inputStream_.get(), chirpProbe_.inputStartFrame);
+        chirpProbe_.outputStartTimeNs =
+                frameTimeNs(outputStream_.get(), chirpProbe_.outputStartFrame);
+        chirpProbe_.inputPeak = -1;
+        chirpProbe_.outputPeak = -1;
+        chirpProbe_.inputScore = 0.f;
+        chirpProbe_.outputScore = 0.f;
+        chirpProbe_.latencyMs = 0.0;
+        chirpProbe_.status.store(0, std::memory_order_relaxed);
+        chirpProbe_.capturing.store(true, std::memory_order_release);
+    }
+
+    int32_t stopChirpLatencyProbe() {
+        chirpProbe_.capturing.store(false, std::memory_order_release);
+        return computeChirpLatencyProbe();
+    }
+
+    double getChirpLatencyMs() const {
+        return chirpProbe_.status.load(std::memory_order_relaxed) == 1
+                ? chirpProbe_.latencyMs
+                : -1.0;
+    }
+
+    int32_t getChirpLatencyStatus() const {
+        return chirpProbe_.status.load(std::memory_order_relaxed);
+    }
+
+    float getChirpInputScore() const {
+        return chirpProbe_.inputScore;
+    }
+
+    float getChirpOutputScore() const {
+        return chirpProbe_.outputScore;
+    }
+
 private:
     struct LatencyProbeSnapshot {
         bool found = false;
@@ -768,6 +842,52 @@ private:
                 rawInputCount_++;
             }
         }
+    }
+
+    void captureChirpProbeInput(
+            const float* samples,
+            int32_t numFrames,
+            int64_t inputStartFrame) {
+        if (!chirpProbe_.capturing.load(std::memory_order_acquire) ||
+            samples == nullptr ||
+            numFrames <= 0) {
+            return;
+        }
+
+        std::lock_guard<std::mutex> lk(chirpProbe_.mu);
+        if (chirpProbe_.input.empty()) {
+            chirpProbe_.inputStartFrame = inputStartFrame;
+            chirpProbe_.inputStartTimeNs = frameTimeNs(inputStream_.get(), inputStartFrame);
+        }
+        appendLimited(chirpProbe_.input, samples, numFrames, chirpProbe_.maxFrames);
+    }
+
+    void captureChirpProbeOutput(
+            const float* samples,
+            int32_t numFrames,
+            int64_t outputStartFrame) {
+        if (!chirpProbe_.capturing.load(std::memory_order_acquire) ||
+            samples == nullptr ||
+            numFrames <= 0) {
+            return;
+        }
+
+        std::lock_guard<std::mutex> lk(chirpProbe_.mu);
+        if (chirpProbe_.output.empty()) {
+            chirpProbe_.outputStartFrame = outputStartFrame;
+            chirpProbe_.outputStartTimeNs = frameTimeNs(outputStream_.get(), outputStartFrame);
+        }
+        appendLimited(chirpProbe_.output, samples, numFrames, chirpProbe_.maxFrames);
+    }
+
+    static void appendLimited(
+            std::vector<float>& dst,
+            const float* src,
+            int32_t numFrames,
+            int32_t maxFrames) {
+        const size_t remaining = (size_t)std::max(0, maxFrames - (int32_t)dst.size());
+        const size_t toCopy = std::min((size_t)numFrames, remaining);
+        if (toCopy > 0) dst.insert(dst.end(), src, src + toCopy);
     }
 
     int64_t frameTimeNs(oboe::AudioStream* stream, int64_t frameIndex) const {
@@ -844,6 +964,119 @@ private:
             latencyProbe_.armed.store(false, std::memory_order_release);
             return;
         }
+    }
+
+    static std::vector<float> makeLatencyChirp(int32_t sampleRate) {
+        const double durationSec = 0.040;
+        const double f0 = 1800.0;
+        const double f1 = 7600.0;
+        const int32_t n = std::max(64, (int32_t)std::lrint(durationSec * sampleRate));
+        const int32_t fade = std::max(1, (int32_t)std::lrint(0.004 * sampleRate));
+        std::vector<float> ref((size_t)n);
+        const double k = (f1 - f0) / durationSec;
+        const double pi = 3.14159265358979323846;
+
+        for (int32_t i = 0; i < n; i++) {
+            const double t = (double)i / (double)sampleRate;
+            const double phase = 2.0 * pi * (f0 * t + 0.5 * k * t * t);
+            double env = 1.0;
+            if (i < fade) {
+                env = 0.5 - 0.5 * std::cos(pi * (double)i / (double)fade);
+            } else if (i >= n - fade) {
+                const int32_t j = n - 1 - i;
+                env = 0.5 - 0.5 * std::cos(pi * (double)j / (double)fade);
+            }
+            ref[(size_t)i] = (float)(std::sin(phase) * env);
+        }
+        return ref;
+    }
+
+    static int32_t findBestCorrelation(
+            const std::vector<float>& signal,
+            const std::vector<float>& ref,
+            float* bestScore) {
+        if (bestScore) *bestScore = 0.f;
+        if (signal.size() < ref.size() || ref.empty()) return -1;
+
+        double refEnergy = 0.0;
+        for (float v : ref) refEnergy += (double)v * (double)v;
+        if (refEnergy <= 1e-12) return -1;
+
+        std::vector<double> prefix(signal.size() + 1, 0.0);
+        for (size_t i = 0; i < signal.size(); i++) {
+            prefix[i + 1] = prefix[i] + (double)signal[i] * (double)signal[i];
+        }
+
+        float maxScore = 0.f;
+        int32_t bestIndex = -1;
+        const size_t maxLag = signal.size() - ref.size();
+        for (size_t lag = 0; lag <= maxLag; lag++) {
+            const double winEnergy = prefix[lag + ref.size()] - prefix[lag];
+            if (winEnergy <= 1e-12) continue;
+
+            double dot = 0.0;
+            for (size_t i = 0; i < ref.size(); i++) {
+                dot += (double)signal[lag + i] * (double)ref[i];
+            }
+            const float score =
+                    (float)std::fabs(dot / std::sqrt(refEnergy * winEnergy));
+            if (score > maxScore) {
+                maxScore = score;
+                bestIndex = (int32_t)lag;
+            }
+        }
+
+        if (bestScore) *bestScore = maxScore;
+        return bestIndex;
+    }
+
+    int32_t computeChirpLatencyProbe() {
+        std::vector<float> input;
+        std::vector<float> output;
+        int32_t sr;
+        int64_t inputStartTimeNs;
+        int64_t outputStartTimeNs;
+
+        {
+            std::lock_guard<std::mutex> lk(chirpProbe_.mu);
+            input = chirpProbe_.input;
+            output = chirpProbe_.output;
+            sr = chirpProbe_.sampleRate;
+            inputStartTimeNs = chirpProbe_.inputStartTimeNs;
+            outputStartTimeNs = chirpProbe_.outputStartTimeNs;
+        }
+
+        if (inputStartTimeNs == 0 || outputStartTimeNs == 0) {
+            chirpProbe_.status.store(-2, std::memory_order_relaxed);
+            return -2;
+        }
+
+        const std::vector<float> ref = makeLatencyChirp(sr);
+        float inputScore = 0.f;
+        float outputScore = 0.f;
+        const int32_t inputPeak = findBestCorrelation(input, ref, &inputScore);
+        const int32_t outputPeak = findBestCorrelation(output, ref, &outputScore);
+
+        chirpProbe_.inputPeak = inputPeak;
+        chirpProbe_.outputPeak = outputPeak;
+        chirpProbe_.inputScore = inputScore;
+        chirpProbe_.outputScore = outputScore;
+
+        static constexpr float kMinCorrelationScore = 0.28f;
+        if (inputPeak < 0 || outputPeak < 0 ||
+            inputScore < kMinCorrelationScore ||
+            outputScore < kMinCorrelationScore) {
+            chirpProbe_.status.store(-1, std::memory_order_relaxed);
+            return -1;
+        }
+
+        const double inputTimeNs =
+                (double)inputStartTimeNs + (double)inputPeak * 1000000000.0 / (double)sr;
+        const double outputTimeNs =
+                (double)outputStartTimeNs + (double)outputPeak * 1000000000.0 / (double)sr;
+        chirpProbe_.latencyMs = (outputTimeNs - inputTimeNs) / 1000000.0;
+        chirpProbe_.status.store(1, std::memory_order_relaxed);
+        return 1;
     }
 };
 
@@ -942,6 +1175,30 @@ double get_latency_probe_ms_ffi() {
 
 int32_t get_latency_probe_status_ffi() {
     return gEngine.getLatencyProbeStatus();
+}
+
+void start_chirp_latency_probe_ffi(int32_t captureMs) {
+    gEngine.startChirpLatencyProbe(captureMs);
+}
+
+int32_t stop_chirp_latency_probe_ffi() {
+    return gEngine.stopChirpLatencyProbe();
+}
+
+double get_chirp_latency_ms_ffi() {
+    return gEngine.getChirpLatencyMs();
+}
+
+int32_t get_chirp_latency_status_ffi() {
+    return gEngine.getChirpLatencyStatus();
+}
+
+float get_chirp_input_score_ffi() {
+    return gEngine.getChirpInputScore();
+}
+
+float get_chirp_output_score_ffi() {
+    return gEngine.getChirpOutputScore();
 }
 
 void debug_start_capture_ffi() {

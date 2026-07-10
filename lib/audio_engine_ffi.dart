@@ -76,6 +76,21 @@ typedef _GetLatencyProbeMsDart = double Function();
 typedef _GetLatencyProbeStatusC = Int32 Function();
 typedef _GetLatencyProbeStatusDart = int Function();
 
+typedef _StartChirpLatencyProbeC = Void Function(Int32 captureMs);
+typedef _StartChirpLatencyProbeDart = void Function(int captureMs);
+
+typedef _StopChirpLatencyProbeC = Int32 Function();
+typedef _StopChirpLatencyProbeDart = int Function();
+
+typedef _GetChirpLatencyMsC = Double Function();
+typedef _GetChirpLatencyMsDart = double Function();
+
+typedef _GetChirpLatencyStatusC = Int32 Function();
+typedef _GetChirpLatencyStatusDart = int Function();
+
+typedef _GetChirpScoreC = Float Function();
+typedef _GetChirpScoreDart = double Function();
+
 typedef _DebugStartCaptureC = Void Function();
 typedef _DebugStartCaptureDart = void Function();
 
@@ -118,6 +133,12 @@ class AudioEngineFFI {
   late final _StopLatencyProbeDart _stopLatencyProbe;
   late final _GetLatencyProbeMsDart _getLatencyProbeMs;
   late final _GetLatencyProbeStatusDart _getLatencyProbeStatus;
+  late final _StartChirpLatencyProbeDart _startChirpLatencyProbe;
+  late final _StopChirpLatencyProbeDart _stopChirpLatencyProbe;
+  late final _GetChirpLatencyMsDart _getChirpLatencyMs;
+  late final _GetChirpLatencyStatusDart _getChirpLatencyStatus;
+  late final _GetChirpScoreDart _getChirpInputScore;
+  late final _GetChirpScoreDart _getChirpOutputScore;
   late final _DebugStartCaptureDart _debugStartCapture;
   late final _DebugStopCaptureDart _debugStopCapture;
   late final _DebugSaveCaptureDart _debugSaveCapture;
@@ -195,6 +216,36 @@ class AudioEngineFFI {
     _getLatencyProbeStatus = _lib
         .lookupFunction<_GetLatencyProbeStatusC, _GetLatencyProbeStatusDart>(
           'get_latency_probe_status_ffi',
+        );
+
+    _startChirpLatencyProbe = _lib
+        .lookupFunction<_StartChirpLatencyProbeC, _StartChirpLatencyProbeDart>(
+          'start_chirp_latency_probe_ffi',
+        );
+
+    _stopChirpLatencyProbe = _lib
+        .lookupFunction<_StopChirpLatencyProbeC, _StopChirpLatencyProbeDart>(
+          'stop_chirp_latency_probe_ffi',
+        );
+
+    _getChirpLatencyMs = _lib
+        .lookupFunction<_GetChirpLatencyMsC, _GetChirpLatencyMsDart>(
+          'get_chirp_latency_ms_ffi',
+        );
+
+    _getChirpLatencyStatus = _lib
+        .lookupFunction<_GetChirpLatencyStatusC, _GetChirpLatencyStatusDart>(
+          'get_chirp_latency_status_ffi',
+        );
+
+    _getChirpInputScore = _lib
+        .lookupFunction<_GetChirpScoreC, _GetChirpScoreDart>(
+          'get_chirp_input_score_ffi',
+        );
+
+    _getChirpOutputScore = _lib
+        .lookupFunction<_GetChirpScoreC, _GetChirpScoreDart>(
+          'get_chirp_output_score_ffi',
         );
 
     _debugStartCapture = _lib
@@ -357,6 +408,33 @@ class AudioEngineFFI {
   /// 0 = waiting, 1 = measured, -1 = stopped/timed out, -2 = timestamp unavailable.
   int getLatencyProbeStatus() {
     return _getLatencyProbeStatus();
+  }
+
+  /// Captures input/output audio for a correlation-based chirp latency test.
+  void startChirpLatencyProbe({int captureMs = 1000}) {
+    _startChirpLatencyProbe(captureMs);
+  }
+
+  /// Stops capture and computes chirp correlation. Returns native status.
+  int stopChirpLatencyProbe() {
+    return _stopChirpLatencyProbe();
+  }
+
+  double getChirpLatencyMs() {
+    return _getChirpLatencyMs();
+  }
+
+  /// 0 = idle/capturing, 1 = measured, -1 = no confident match, -2 = timestamp unavailable.
+  int getChirpLatencyStatus() {
+    return _getChirpLatencyStatus();
+  }
+
+  double getChirpInputScore() {
+    return _getChirpInputScore();
+  }
+
+  double getChirpOutputScore() {
+    return _getChirpOutputScore();
   }
 
   /// Starts capturing input audio samples for debugging.

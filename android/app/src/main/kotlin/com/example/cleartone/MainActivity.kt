@@ -15,6 +15,7 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import kotlin.math.PI
+import kotlin.math.cos
 import kotlin.math.pow
 import kotlin.math.sin
 import java.util.Locale
@@ -78,6 +79,12 @@ class MainActivity : FlutterActivity() {
                 }
                 "stopTone" -> {
                     stopTone()
+                    result.success(null)
+                }
+                "playLatencyChirp" -> {
+                    val amplitude = call.argument<Double>("amplitude") ?: 76.0
+                    val routeToSpeaker = call.argument<Boolean>("routeToSpeaker") ?: true
+                    playLatencyChirp(amplitude, routeToSpeaker)
                     result.success(null)
                 }
                 "getAudioInputDevices" -> {
@@ -460,5 +467,80 @@ class MainActivity : FlutterActivity() {
         audioTrack?.stop()
         audioTrack?.release()
         audioTrack = null
+    }
+
+    private fun playLatencyChirp(amplitudeDb: Double, routeToSpeaker: Boolean) {
+        stopTone()
+
+        val sampleRate = 48000
+        val leadSilenceMs = 120
+        val chirpMs = 40
+        val tailSilenceMs = 120
+        val leadSamples = (leadSilenceMs * sampleRate) / 1000
+        val chirpSamples = (chirpMs * sampleRate) / 1000
+        val tailSamples = (tailSilenceMs * sampleRate) / 1000
+        val totalSamples = leadSamples + chirpSamples + tailSamples
+        val samples = ShortArray(totalSamples * 2)
+        val linearAmplitude = (10.0.pow((amplitudeDb - MAX_DB) / 20.0) * 0.90)
+            .toFloat()
+            .coerceIn(0.0f, 0.95f)
+        val f0 = 1800.0
+        val f1 = 7600.0
+        val durationSec = chirpMs / 1000.0
+        val k = (f1 - f0) / durationSec
+        val fadeSamples = (0.004 * sampleRate).toInt().coerceAtLeast(1)
+
+        for (i in 0 until chirpSamples) {
+            val t = i.toDouble() / sampleRate
+            val phase = 2.0 * PI * (f0 * t + 0.5 * k * t * t)
+            val envelope =
+                when {
+                    i < fadeSamples -> 0.5 - 0.5 * cos(PI * i.toDouble() / fadeSamples)
+                    i >= chirpSamples - fadeSamples -> {
+                        val j = chirpSamples - 1 - i
+                        0.5 - 0.5 * cos(PI * j.toDouble() / fadeSamples)
+                    }
+                    else -> 1.0
+                }
+            val sampleValue =
+                (sin(phase) * envelope * linearAmplitude * Short.MAX_VALUE)
+                    .toInt()
+                    .toShort()
+            val stereoIndex = (leadSamples + i) * 2
+            samples[stereoIndex] = sampleValue
+            samples[stereoIndex + 1] = sampleValue
+        }
+
+        audioTrack =
+            AudioTrack.Builder()
+                .setAudioAttributes(
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(sampleRate)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
+                        .build()
+                )
+                .setBufferSizeInBytes(samples.size * 2)
+                .setTransferMode(AudioTrack.MODE_STATIC)
+                .build()
+
+        if (routeToSpeaker && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
+            val speaker = audioManager
+                .getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+            if (speaker != null) {
+                audioTrack?.preferredDevice = speaker
+            }
+        }
+
+        audioTrack?.write(samples, 0, samples.size)
+        audioTrack?.play()
     }
 }
