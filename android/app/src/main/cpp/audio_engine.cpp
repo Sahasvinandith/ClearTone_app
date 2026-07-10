@@ -551,6 +551,8 @@ public:
         float inputScore = 0.f;
         float outputScore = 0.f;
         double latencyMs = 0.0;
+        float acousticScore = 0.f;
+        double acousticLatencyMs = 0.0;
     } chirpProbe_;
 
     // Raw mic frames for environment detection. This is a single-producer
@@ -803,6 +805,20 @@ public:
 
     float getChirpOutputScore() const {
         return chirpProbe_.outputScore;
+    }
+
+    int32_t computeAcousticChirpLatency(int64_t playbackStartNs) {
+        return computeAcousticChirpLatencyProbe(playbackStartNs);
+    }
+
+    double getAcousticChirpLatencyMs() const {
+        return chirpProbe_.status.load(std::memory_order_relaxed) == 1
+                ? chirpProbe_.acousticLatencyMs
+                : -1.0;
+    }
+
+    float getAcousticChirpScore() const {
+        return chirpProbe_.acousticScore;
     }
 
 private:
@@ -1078,6 +1094,44 @@ private:
         chirpProbe_.status.store(1, std::memory_order_relaxed);
         return 1;
     }
+
+    int32_t computeAcousticChirpLatencyProbe(int64_t playbackStartNs) {
+        std::vector<float> input;
+        int32_t sr;
+        int64_t inputStartTimeNs;
+
+        {
+            std::lock_guard<std::mutex> lk(chirpProbe_.mu);
+            input = chirpProbe_.input;
+            sr = chirpProbe_.sampleRate;
+            inputStartTimeNs = chirpProbe_.inputStartTimeNs;
+        }
+
+        if (inputStartTimeNs == 0 || playbackStartNs <= 0) {
+            chirpProbe_.status.store(-2, std::memory_order_relaxed);
+            return -2;
+        }
+
+        const std::vector<float> ref = makeLatencyChirp(sr);
+        float inputScore = 0.f;
+        const int32_t inputPeak = findBestCorrelation(input, ref, &inputScore);
+
+        chirpProbe_.inputPeak = inputPeak;
+        chirpProbe_.acousticScore = inputScore;
+
+        static constexpr float kMinCorrelationScore = 0.28f;
+        if (inputPeak < 0 || inputScore < kMinCorrelationScore) {
+            chirpProbe_.status.store(-1, std::memory_order_relaxed);
+            return -1;
+        }
+
+        const double inputTimeNs =
+                (double)inputStartTimeNs + (double)inputPeak * 1000000000.0 / (double)sr;
+        chirpProbe_.acousticLatencyMs =
+                (inputTimeNs - (double)playbackStartNs) / 1000000.0;
+        chirpProbe_.status.store(1, std::memory_order_relaxed);
+        return 1;
+    }
 };
 
 static OboeEngine gEngine;
@@ -1199,6 +1253,18 @@ float get_chirp_input_score_ffi() {
 
 float get_chirp_output_score_ffi() {
     return gEngine.getChirpOutputScore();
+}
+
+int32_t compute_acoustic_chirp_latency_ffi(int64_t playbackStartNs) {
+    return gEngine.computeAcousticChirpLatency(playbackStartNs);
+}
+
+double get_acoustic_chirp_latency_ms_ffi() {
+    return gEngine.getAcousticChirpLatencyMs();
+}
+
+float get_acoustic_chirp_score_ffi() {
+    return gEngine.getAcousticChirpScore();
 }
 
 void debug_start_capture_ffi() {

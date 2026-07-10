@@ -84,8 +84,8 @@ class MainActivity : FlutterActivity() {
                 "playLatencyChirp" -> {
                     val amplitude = call.argument<Double>("amplitude") ?: 76.0
                     val routeToSpeaker = call.argument<Boolean>("routeToSpeaker") ?: true
-                    playLatencyChirp(amplitude, routeToSpeaker)
-                    result.success(null)
+                    val chirpStartNs = playLatencyChirp(amplitude, routeToSpeaker)
+                    result.success(chirpStartNs)
                 }
                 "getAudioInputDevices" -> {
                     try {
@@ -469,7 +469,7 @@ class MainActivity : FlutterActivity() {
         audioTrack = null
     }
 
-    private fun playLatencyChirp(amplitudeDb: Double, routeToSpeaker: Boolean) {
+    private fun playLatencyChirp(amplitudeDb: Double, routeToSpeaker: Boolean): Long {
         stopTone()
 
         val sampleRate = 48000
@@ -541,6 +541,8 @@ class MainActivity : FlutterActivity() {
         }
 
         audioTrack?.write(samples, 0, samples.size)
+        val playbackStartNs = System.nanoTime()
         audioTrack?.play()
+        return playbackStartNs + leadSilenceMs * 1_000_000L
     }
 }

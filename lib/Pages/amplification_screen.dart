@@ -54,10 +54,13 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
       true; // Conversation Mode suppression diagnostic toggle
   bool _isMeasuringLatency = false;
   bool _isMeasuringChirpLatency = false;
+  bool _isMeasuringEarbudLatency = false;
   double? _lastLatencyMs;
   double? _lastChirpLatencyMs;
   double? _lastChirpInputScore;
   double? _lastChirpOutputScore;
+  double? _lastEarbudLatencyMs;
+  double? _lastEarbudLatencyScore;
   Timer? _reconnectTimer;
 
   // --- Environment Auto-Detection State ---
@@ -413,6 +416,15 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
     }
   }
 
+  bool get _selectedInputLooksBuiltInMic {
+    final selectedDevice = _audioDevices.firstWhere(
+      (d) => d['id'] == _selectedDeviceId,
+      orElse: () => {},
+    );
+    final name = (selectedDevice['name'] as String? ?? '').toLowerCase();
+    return name.contains('built-in mic') || name.contains('built in mic');
+  }
+
   Map<String, Object> get _overlayPayload => {
     'mode': _overlayModeLabel,
     'autoDetectEnabled': _envDetectEnabled,
@@ -527,6 +539,7 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
         _isRtStreaming = false;
         _isMeasuringLatency = false;
         _isMeasuringChirpLatency = false;
+        _isMeasuringEarbudLatency = false;
       });
       _publishAmplificationStatus();
     } else {
@@ -889,6 +902,88 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Chirp latency error: $e')));
+    } finally {
+      unawaited(_audioGenerator.stopTone());
+    }
+  }
+
+  Future<void> _measureEarbudAcousticLatency() async {
+    if (!_isRtStreaming) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Start streaming with the phone mic first.'),
+        ),
+      );
+      return;
+    }
+    if (_isMeasuringLatency ||
+        _isMeasuringChirpLatency ||
+        _isMeasuringEarbudLatency) {
+      return;
+    }
+
+    if (!_selectedInputLooksBuiltInMic) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Select the built-in phone mic, then place the earbud speaker near it.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isMeasuringEarbudLatency = true;
+      _lastEarbudLatencyMs = null;
+      _lastEarbudLatencyScore = null;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Earbud probe running. Keep one earbud speaker close to the phone mic.',
+        ),
+      ),
+    );
+
+    try {
+      _audioEngine.startChirpLatencyProbe(captureMs: 1200);
+      await Future.delayed(const Duration(milliseconds: 100));
+      final chirpStartNs = await _audioGenerator.playLatencyChirp(
+        routeToSpeaker: false,
+      );
+      await Future.delayed(const Duration(milliseconds: 1000));
+      _audioEngine.stopChirpLatencyProbe();
+
+      final status = _audioEngine.computeAcousticChirpLatency(chirpStartNs);
+      final latencyMs = _audioEngine.getAcousticChirpLatencyMs();
+      final score = _audioEngine.getAcousticChirpScore();
+
+      if (!mounted) return;
+      setState(() {
+        _isMeasuringEarbudLatency = false;
+        _lastEarbudLatencyScore = score;
+        _lastEarbudLatencyMs = status == 1 ? latencyMs : null;
+      });
+
+      final message = status == 1
+          ? 'Earbud acoustic estimate: ${latencyMs.toStringAsFixed(2)} ms '
+                '(match ${score.toStringAsFixed(2)})'
+          : status == -2
+          ? 'Earbud probe failed: stream timestamp unavailable.'
+          : 'Earbud chirp not matched confidently '
+                '(match ${score.toStringAsFixed(2)}).';
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    } catch (e) {
+      _audioEngine.stopChirpLatencyProbe();
+      if (!mounted) return;
+      setState(() => _isMeasuringEarbudLatency = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Earbud latency error: $e')));
     } finally {
       unawaited(_audioGenerator.stopTone());
     }
@@ -2278,7 +2373,11 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
                 ),
                 const SizedBox(height: 12),
                 OutlinedButton.icon(
-                  onPressed: _isRtStreaming && !_isMeasuringLatency
+                  onPressed:
+                      _isRtStreaming &&
+                          !_isMeasuringLatency &&
+                          !_isMeasuringChirpLatency &&
+                          !_isMeasuringEarbudLatency
                       ? _measureRtLatency
                       : null,
                   icon: Icon(
@@ -2316,7 +2415,8 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
                   onPressed:
                       _isRtStreaming &&
                           !_isMeasuringLatency &&
-                          !_isMeasuringChirpLatency
+                          !_isMeasuringChirpLatency &&
+                          !_isMeasuringEarbudLatency
                       ? _measureChirpRtLatency
                       : null,
                   icon: Icon(
@@ -2346,6 +2446,51 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
                     _lastChirpLatencyMs == null
                         ? 'Chirp match: input ${(_lastChirpInputScore ?? 0).toStringAsFixed(2)}, output ${(_lastChirpOutputScore ?? 0).toStringAsFixed(2)}'
                         : 'Chirp latency: ${_lastChirpLatencyMs!.toStringAsFixed(2)} ms  |  match ${(_lastChirpInputScore ?? 0).toStringAsFixed(2)} / ${(_lastChirpOutputScore ?? 0).toStringAsFixed(2)}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed:
+                      _isRtStreaming &&
+                          !_isMeasuringLatency &&
+                          !_isMeasuringChirpLatency &&
+                          !_isMeasuringEarbudLatency
+                      ? _measureEarbudAcousticLatency
+                      : null,
+                  icon: Icon(
+                    _isMeasuringEarbudLatency
+                        ? Icons.graphic_eq
+                        : Icons.earbuds,
+                    size: 18,
+                  ),
+                  label: Text(
+                    _isMeasuringEarbudLatency
+                        ? 'LISTENING TO EARBUD CHIRP'
+                        : 'MEASURE EARBUD ACOUSTIC LATENCY',
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFFD4AF37),
+                    disabledForegroundColor: const Color(0xFF666666),
+                    side: BorderSide(
+                      color: _isRtStreaming
+                          ? const Color(0xFFD4AF37)
+                          : const Color(0xFF333333),
+                    ),
+                  ),
+                ),
+                if (_lastEarbudLatencyMs != null ||
+                    _lastEarbudLatencyScore != null) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    _lastEarbudLatencyMs == null
+                        ? 'Earbud acoustic match: ${(_lastEarbudLatencyScore ?? 0).toStringAsFixed(2)}'
+                        : 'Earbud acoustic estimate: ${_lastEarbudLatencyMs!.toStringAsFixed(2)} ms  |  match ${(_lastEarbudLatencyScore ?? 0).toStringAsFixed(2)}',
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                       color: Colors.white70,

@@ -91,6 +91,9 @@ typedef _GetChirpLatencyStatusDart = int Function();
 typedef _GetChirpScoreC = Float Function();
 typedef _GetChirpScoreDart = double Function();
 
+typedef _ComputeAcousticChirpLatencyC = Int32 Function(Int64 playbackStartNs);
+typedef _ComputeAcousticChirpLatencyDart = int Function(int playbackStartNs);
+
 typedef _DebugStartCaptureC = Void Function();
 typedef _DebugStartCaptureDart = void Function();
 
@@ -139,6 +142,9 @@ class AudioEngineFFI {
   late final _GetChirpLatencyStatusDart _getChirpLatencyStatus;
   late final _GetChirpScoreDart _getChirpInputScore;
   late final _GetChirpScoreDart _getChirpOutputScore;
+  late final _ComputeAcousticChirpLatencyDart _computeAcousticChirpLatency;
+  late final _GetChirpLatencyMsDart _getAcousticChirpLatencyMs;
+  late final _GetChirpScoreDart _getAcousticChirpScore;
   late final _DebugStartCaptureDart _debugStartCapture;
   late final _DebugStopCaptureDart _debugStopCapture;
   late final _DebugSaveCaptureDart _debugSaveCapture;
@@ -246,6 +252,22 @@ class AudioEngineFFI {
     _getChirpOutputScore = _lib
         .lookupFunction<_GetChirpScoreC, _GetChirpScoreDart>(
           'get_chirp_output_score_ffi',
+        );
+
+    _computeAcousticChirpLatency = _lib
+        .lookupFunction<
+          _ComputeAcousticChirpLatencyC,
+          _ComputeAcousticChirpLatencyDart
+        >('compute_acoustic_chirp_latency_ffi');
+
+    _getAcousticChirpLatencyMs = _lib
+        .lookupFunction<_GetChirpLatencyMsC, _GetChirpLatencyMsDart>(
+          'get_acoustic_chirp_latency_ms_ffi',
+        );
+
+    _getAcousticChirpScore = _lib
+        .lookupFunction<_GetChirpScoreC, _GetChirpScoreDart>(
+          'get_acoustic_chirp_score_ffi',
         );
 
     _debugStartCapture = _lib
@@ -435,6 +457,20 @@ class AudioEngineFFI {
 
   double getChirpOutputScore() {
     return _getChirpOutputScore();
+  }
+
+  /// Computes acoustic output latency using the current chirp capture input
+  /// window and the monotonic timestamp returned by Android chirp playback.
+  int computeAcousticChirpLatency(int playbackStartNs) {
+    return _computeAcousticChirpLatency(playbackStartNs);
+  }
+
+  double getAcousticChirpLatencyMs() {
+    return _getAcousticChirpLatencyMs();
+  }
+
+  double getAcousticChirpScore() {
+    return _getAcousticChirpScore();
   }
 
   /// Starts capturing input audio samples for debugging.
