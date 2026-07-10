@@ -57,7 +57,7 @@ class EnvironmentDetectorService {
   static const int _windowSamples = 88200; // 4 s at 22050 Hz
 
   // ---- Runtime-adjustable parameters ----
-  double silenceThreshold = 0.01;
+  double silenceThreshold = 0.007;
   double hopSeconds = 1.0;
   bool useVoteSmoothing = true;
 

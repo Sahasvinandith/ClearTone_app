@@ -54,7 +54,7 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
 
   // --- Environment Auto-Detection State ---
   bool _envDetectEnabled = false;
-  double _envSilenceThreshold = 0.01;
+  double _envSilenceThreshold = 0.007;
   late final TextEditingController _envSilenceThresholdController;
   double _envHopSize = 1.0;
   EnvironmentDetectorService? _envDetector;
@@ -1787,7 +1787,7 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
                                             ),
                                         filled: true,
                                         fillColor: const Color(0xFF1F1F1F),
-                                        hintText: '0.010',
+                                        hintText: '0.007',
                                         hintStyle: const TextStyle(
                                           color: Colors.white30,
                                         ),
