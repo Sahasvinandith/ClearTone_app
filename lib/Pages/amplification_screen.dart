@@ -23,6 +23,9 @@ class AmplificationScreen extends StatefulWidget {
 }
 
 class _AmplificationScreenState extends State<AmplificationScreen> {
+  static const double _demoMinLossDb = 0.0;
+  static const double _demoMaxLossDb = 60.0;
+
   // --- Record Mode State ---
   AudioRecorder _audioRecorder = AudioRecorder();
   final AudioPlayer _audioPlayer = AudioPlayer();
@@ -119,7 +122,7 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
       text: _envSilenceThreshold.toStringAsFixed(3),
     );
     _initRtGainFromProfile();
-    _demoLosses = List<double>.from(_rtLosses);
+    _demoLosses = _clampDemoLosses(_rtLosses);
     _startReconnectTimer();
     amplificationController.register(
       setStreaming: _setRtStreaming,
@@ -358,6 +361,18 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
     } else {
       _rtLosses = List.filled(6, 0.0);
     }
+  }
+
+  double _clampDemoLoss(double value) {
+    return value.clamp(_demoMinLossDb, _demoMaxLossDb).toDouble();
+  }
+
+  List<double> _clampDemoLosses(List<double> values) {
+    final clamped = values.map(_clampDemoLoss).toList();
+    while (clamped.length < 6) {
+      clamped.add(_demoMinLossDb);
+    }
+    return clamped.length > 6 ? clamped.sublist(0, 6) : clamped;
   }
 
   // --- Real-time Methods ---
@@ -1142,18 +1157,19 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
     setState(() {
       _demoBroadbandMode = broadbandMode;
       if (broadbandMode) {
-        _demoLosses = List<double>.filled(6, _demoLosses.first);
+        _demoLosses = List<double>.filled(6, _clampDemoLoss(_demoLosses.first));
       }
     });
     _prepareDemoPlayback(restartIfPlaying: _isPlaying);
   }
 
   void _onDemoLossChanged(int index, double value) {
+    final clampedValue = _clampDemoLoss(value);
     setState(() {
       if (_demoBroadbandMode) {
-        _demoLosses = List<double>.filled(6, value);
+        _demoLosses = List<double>.filled(6, clampedValue);
       } else {
-        _demoLosses[index] = value;
+        _demoLosses[index] = clampedValue;
       }
     });
 
@@ -1704,7 +1720,7 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
   }
 
   Widget _buildDemoGainSlider(int index) {
-    final value = _demoLosses[index];
+    final value = _clampDemoLoss(_demoLosses[index]);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -1730,8 +1746,8 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
               ),
               child: Slider(
                 value: value,
-                min: 0,
-                max: 60,
+                min: _demoMinLossDb,
+                max: _demoMaxLossDb,
                 divisions: 60,
                 label: '${value.round()} dB',
                 onChanged: (newValue) => _onDemoLossChanged(index, newValue),
