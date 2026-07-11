@@ -95,6 +95,13 @@ class MainActivity : FlutterActivity() {
                         result.error("DEVICE_ERROR", e.message, null)
                     }
                 }
+                "getDeviceInfo" -> {
+                    try {
+                        result.success(getDeviceInfo())
+                    } catch (e: Exception) {
+                        result.error("DEVICE_INFO_ERROR", e.message, null)
+                    }
+                }
                 "enableBluetoothSco" -> {
                     val enable = call.argument<Boolean>("enable") ?: false
                     enableBluetoothSco(enable)
@@ -211,6 +218,26 @@ class MainActivity : FlutterActivity() {
         }
         
         return deviceList
+    }
+
+    // For metadata/session_config.json + metadata/device_info.json
+    // (docs/validation.md). App version comes from the installed package
+    // rather than a hardcoded string so it always matches the running build.
+    private fun getDeviceInfo(): Map<String, Any> {
+        val appVersion = try {
+            val pInfo = packageManager.getPackageInfo(packageName, 0)
+            @Suppress("DEPRECATION")
+            "${pInfo.versionName} (${pInfo.versionCode})"
+        } catch (e: Exception) {
+            "unknown"
+        }
+        return mapOf(
+            "manufacturer" to Build.MANUFACTURER,
+            "phone_model" to Build.MODEL,
+            "android_version" to Build.VERSION.RELEASE,
+            "android_sdk_int" to Build.VERSION.SDK_INT,
+            "app_version" to appVersion
+        )
     }
 
     private fun enableBluetoothSco(enable: Boolean) {

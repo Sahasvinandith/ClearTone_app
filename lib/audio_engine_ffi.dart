@@ -120,6 +120,163 @@ typedef _SetEnvironmentModeDart = int Function(int mode);
 typedef _SetExpanderEnabledC = Int32 Function(Int32 enabled);
 typedef _SetExpanderEnabledDart = int Function(int enabled);
 
+// ---- Evidence / diagnostic capture (docs/validation.md) -------------------
+
+typedef _EvidenceStartC =
+    Int32 Function(
+      Pointer<Utf8> sessionId,
+      Int32 experimentType,
+      Int32 mode,
+      Int32 durationSeconds,
+      Int32 captureRawProcessed,
+      Int32 captureBandLog,
+      Int32 captureLimiterLog,
+      Int32 captureFrameLog,
+    );
+typedef _EvidenceStartDart =
+    int Function(
+      Pointer<Utf8> sessionId,
+      int experimentType,
+      int mode,
+      int durationSeconds,
+      int captureRawProcessed,
+      int captureBandLog,
+      int captureLimiterLog,
+      int captureFrameLog,
+    );
+
+typedef _EvidenceStopC = Int32 Function();
+typedef _EvidenceStopDart = int Function();
+
+typedef _EvidenceFlushC =
+    Int32 Function(Pointer<Utf8> logsDir, Pointer<Utf8> audioDir);
+typedef _EvidenceFlushDart =
+    int Function(Pointer<Utf8> logsDir, Pointer<Utf8> audioDir);
+
+typedef _EvidenceLogGainUpdateC =
+    Void Function(Pointer<Utf8> source, Pointer<Float> gainsDb6);
+typedef _EvidenceLogGainUpdateDart =
+    void Function(Pointer<Utf8> source, Pointer<Float> gainsDb6);
+
+typedef _GetBandGainsDbC = Void Function(Pointer<Float> outGainsDb6);
+typedef _GetBandGainsDbDart = void Function(Pointer<Float> outGainsDb6);
+
+typedef _GetDspParamsC =
+    Void Function(
+      Pointer<Float> outThrDb6,
+      Pointer<Float> outRatio,
+      Pointer<Float> outAttackMs,
+      Pointer<Float> outReleaseMs,
+      Pointer<Float> outLimiterThr,
+      Pointer<Float> outWet,
+      Pointer<Float> outDry,
+    );
+typedef _GetDspParamsDart =
+    void Function(
+      Pointer<Float> outThrDb6,
+      Pointer<Float> outRatio,
+      Pointer<Float> outAttackMs,
+      Pointer<Float> outReleaseMs,
+      Pointer<Float> outLimiterThr,
+      Pointer<Float> outWet,
+      Pointer<Float> outDry,
+    );
+
+typedef _GetDspConfigForProfileC =
+    Void Function(
+      Pointer<Float> loss6,
+      Int32 mode,
+      Int32 sampleRate,
+      Pointer<Float> outGainsDb6,
+      Pointer<Float> outThrDb6,
+      Pointer<Float> outRatio,
+      Pointer<Float> outAttackMs,
+      Pointer<Float> outReleaseMs,
+      Pointer<Float> outLimiterThr,
+      Pointer<Float> outWet,
+      Pointer<Float> outDry,
+    );
+typedef _GetDspConfigForProfileDart =
+    void Function(
+      Pointer<Float> loss6,
+      int mode,
+      int sampleRate,
+      Pointer<Float> outGainsDb6,
+      Pointer<Float> outThrDb6,
+      Pointer<Float> outRatio,
+      Pointer<Float> outAttackMs,
+      Pointer<Float> outReleaseMs,
+      Pointer<Float> outLimiterThr,
+      Pointer<Float> outWet,
+      Pointer<Float> outDry,
+    );
+
+typedef _ProcessAudioFileFullC =
+    Int32 Function(
+      Pointer<Utf8> inPath,
+      Pointer<Utf8> outPath,
+      Pointer<Float> loss6,
+      Int32 mode,
+      Pointer<Utf8> bandLogCsvPath,
+      Pointer<Utf8> limiterLogCsvPath,
+      Pointer<Utf8> sourceLabel,
+    );
+typedef _ProcessAudioFileFullDart =
+    int Function(
+      Pointer<Utf8> inPath,
+      Pointer<Utf8> outPath,
+      Pointer<Float> loss6,
+      int mode,
+      Pointer<Utf8> bandLogCsvPath,
+      Pointer<Utf8> limiterLogCsvPath,
+      Pointer<Utf8> sourceLabel,
+    );
+
+typedef _GenerateToneWavC =
+    Int32 Function(
+      Pointer<Utf8> path,
+      Float freqHz,
+      Float durationSec,
+      Int32 sampleRate,
+      Float amplitudeDbFs,
+    );
+typedef _GenerateToneWavDart =
+    int Function(
+      Pointer<Utf8> path,
+      double freqHz,
+      double durationSec,
+      int sampleRate,
+      double amplitudeDbFs,
+    );
+
+typedef _GenerateSweepWavC =
+    Int32 Function(
+      Pointer<Utf8> path,
+      Float f0Hz,
+      Float f1Hz,
+      Float durationSec,
+      Int32 sampleRate,
+      Float amplitudeDbFs,
+    );
+typedef _GenerateSweepWavDart =
+    int Function(
+      Pointer<Utf8> path,
+      double f0Hz,
+      double f1Hz,
+      double durationSec,
+      int sampleRate,
+      double amplitudeDbFs,
+    );
+
+typedef _GenerateSyntheticTestWavC =
+    Int32 Function(
+      Pointer<Utf8> path,
+      Float durationSec,
+      Int32 sampleRate,
+    );
+typedef _GenerateSyntheticTestWavDart =
+    int Function(Pointer<Utf8> path, double durationSec, int sampleRate);
+
 class AudioEngineFFI {
   static final AudioEngineFFI _instance = AudioEngineFFI._internal();
   factory AudioEngineFFI() => _instance;
@@ -153,6 +310,17 @@ class AudioEngineFFI {
   late final _IsPlayingDart _isPlaying;
   late final _SetEnvironmentModeDart _setEnvironmentMode;
   late final _SetExpanderEnabledDart _setExpanderEnabled;
+  late final _EvidenceStartDart _evidenceStart;
+  late final _EvidenceStopDart _evidenceStop;
+  late final _EvidenceFlushDart _evidenceFlush;
+  late final _EvidenceLogGainUpdateDart _evidenceLogGainUpdate;
+  late final _GetBandGainsDbDart _getBandGainsDb;
+  late final _GetDspParamsDart _getDspParams;
+  late final _GetDspConfigForProfileDart _getDspConfigForProfile;
+  late final _ProcessAudioFileFullDart _processAudioFileFull;
+  late final _GenerateToneWavDart _generateToneWav;
+  late final _GenerateSweepWavDart _generateSweepWav;
+  late final _GenerateSyntheticTestWavDart _generateSyntheticTestWav;
 
   // Persistent native buffer for updateRtParams — avoids calloc/free on every
   // slider change (which fires many times per second during a drag).
@@ -307,6 +475,58 @@ class AudioEngineFFI {
         .lookupFunction<_SetExpanderEnabledC, _SetExpanderEnabledDart>(
           'set_expander_enabled_ffi',
         );
+
+    _evidenceStart = _lib.lookupFunction<_EvidenceStartC, _EvidenceStartDart>(
+      'evidence_start_ffi',
+    );
+
+    _evidenceStop = _lib.lookupFunction<_EvidenceStopC, _EvidenceStopDart>(
+      'evidence_stop_ffi',
+    );
+
+    _evidenceFlush = _lib.lookupFunction<_EvidenceFlushC, _EvidenceFlushDart>(
+      'evidence_flush_ffi',
+    );
+
+    _evidenceLogGainUpdate = _lib
+        .lookupFunction<_EvidenceLogGainUpdateC, _EvidenceLogGainUpdateDart>(
+          'evidence_log_gain_update_ffi',
+        );
+
+    _getBandGainsDb = _lib
+        .lookupFunction<_GetBandGainsDbC, _GetBandGainsDbDart>(
+          'get_band_gains_db_ffi',
+        );
+
+    _getDspParams = _lib.lookupFunction<_GetDspParamsC, _GetDspParamsDart>(
+      'get_dsp_params_ffi',
+    );
+
+    _getDspConfigForProfile = _lib
+        .lookupFunction<_GetDspConfigForProfileC, _GetDspConfigForProfileDart>(
+          'get_dsp_config_for_profile_ffi',
+        );
+
+    _processAudioFileFull = _lib
+        .lookupFunction<_ProcessAudioFileFullC, _ProcessAudioFileFullDart>(
+          'process_audio_file_full_ffi',
+        );
+
+    _generateToneWav = _lib
+        .lookupFunction<_GenerateToneWavC, _GenerateToneWavDart>(
+          'generate_tone_wav_ffi',
+        );
+
+    _generateSweepWav = _lib
+        .lookupFunction<_GenerateSweepWavC, _GenerateSweepWavDart>(
+          'generate_sweep_wav_ffi',
+        );
+
+    _generateSyntheticTestWav = _lib
+        .lookupFunction<
+          _GenerateSyntheticTestWavC,
+          _GenerateSyntheticTestWavDart
+        >('generate_synthetic_test_wav_ffi');
   }
 
   /// Processes the audio file at [inPath] and saves it to [outPath].
@@ -518,5 +738,299 @@ class AudioEngineFFI {
   /// Use for diagnostics when checking own-voice feedback or voice fading.
   int setExpanderEnabled(bool enabled) {
     return _setExpanderEnabled(enabled ? 1 : 0);
+  }
+
+  // ---- Evidence / diagnostic capture (docs/validation.md) -----------------
+
+  /// Starts an evidence/diagnostic capture session.
+  /// experimentType: 0 live_microphone_test, 1 pure_tone_test, 2 sweep_test,
+  ///                 3 mode_comparison_test, 4 limiter_test.
+  /// mode: 0 Standard, 1 Transit, 2 Conversation.
+  int evidenceStart({
+    required String sessionId,
+    required int experimentType,
+    required int mode,
+    required int durationSeconds,
+    bool captureRawProcessed = true,
+    bool captureBandLog = true,
+    bool captureLimiterLog = true,
+    bool captureFrameLog = true,
+  }) {
+    final Pointer<Utf8> idPtr = sessionId.toNativeUtf8();
+    try {
+      return _evidenceStart(
+        idPtr,
+        experimentType,
+        mode,
+        durationSeconds,
+        captureRawProcessed ? 1 : 0,
+        captureBandLog ? 1 : 0,
+        captureLimiterLog ? 1 : 0,
+        captureFrameLog ? 1 : 0,
+      );
+    } finally {
+      calloc.free(idPtr);
+    }
+  }
+
+  /// Stops new writes into the active evidence session's buffers.
+  int evidenceStop() {
+    return _evidenceStop();
+  }
+
+  /// Flushes captured logs (CSV) into [logsDir] and any captured live-mic
+  /// WAVs into [audioDir]. Both directories must already exist. Safe to call
+  /// after each experiment step -- band/limiter CSV rows accumulate across
+  /// calls within the same session rather than being overwritten.
+  int evidenceFlush({required String logsDir, required String audioDir}) {
+    final Pointer<Utf8> logsPtr = logsDir.toNativeUtf8();
+    final Pointer<Utf8> audioPtr = audioDir.toNativeUtf8();
+    try {
+      return _evidenceFlush(logsPtr, audioPtr);
+    } finally {
+      calloc.free(logsPtr);
+      calloc.free(audioPtr);
+    }
+  }
+
+  /// Records a gain-slider/hearing-profile change into gain_update_log.csv.
+  /// source: "hearing_profile" / "manual_slider" / "mode_adjustment" / "test_override".
+  void evidenceLogGainUpdate(String source, List<double> gainsDb6) {
+    if (gainsDb6.length != 6) {
+      throw ArgumentError('gainsDb6 must contain exactly 6 elements');
+    }
+    final Pointer<Utf8> sourcePtr = source.toNativeUtf8();
+    final Pointer<Float> gainsPtr = calloc<Float>(6);
+    for (int i = 0; i < 6; i++) {
+      gainsPtr[i] = gainsDb6[i];
+    }
+    try {
+      _evidenceLogGainUpdate(sourcePtr, gainsPtr);
+    } finally {
+      calloc.free(sourcePtr);
+      calloc.free(gainsPtr);
+    }
+  }
+
+  /// Current per-band makeup gain in dB, derived from the active hearing
+  /// profile / slider values -- for session_config.json / dsp_config.json /
+  /// gain_profile.csv.
+  List<double> getBandGainsDb() {
+    final Pointer<Float> buf = calloc<Float>(6);
+    try {
+      _getBandGainsDb(buf);
+      return List<double>.generate(6, (i) => buf[i]);
+    } finally {
+      calloc.free(buf);
+    }
+  }
+
+  /// Current compressor/limiter configuration, for dsp_config.json.
+  Map<String, dynamic> getDspParams() {
+    final Pointer<Float> thrDb = calloc<Float>(6);
+    final Pointer<Float> ratio = calloc<Float>(1);
+    final Pointer<Float> attackMs = calloc<Float>(1);
+    final Pointer<Float> releaseMs = calloc<Float>(1);
+    final Pointer<Float> limiterThr = calloc<Float>(1);
+    final Pointer<Float> wet = calloc<Float>(1);
+    final Pointer<Float> dry = calloc<Float>(1);
+    try {
+      _getDspParams(thrDb, ratio, attackMs, releaseMs, limiterThr, wet, dry);
+      return {
+        'threshold_db_per_band': List<double>.generate(6, (i) => thrDb[i]),
+        'ratio': ratio[0],
+        'attack_ms': attackMs[0],
+        'release_ms': releaseMs[0],
+        'limiter_threshold': limiterThr[0],
+        'wet_mix': wet[0],
+        'dry_mix': dry[0],
+      };
+    } finally {
+      calloc.free(thrDb);
+      calloc.free(ratio);
+      calloc.free(attackMs);
+      calloc.free(releaseMs);
+      calloc.free(limiterThr);
+      calloc.free(wet);
+      calloc.free(dry);
+    }
+  }
+
+  /// Deterministic dsp_config.json / gain_profile.csv source for a given
+  /// [loss6] + [mode], independent of whether the live real-time engine is
+  /// running. Builds a fresh RealtimeProcessor natively (the exact same
+  /// class -- and the exact same construction -- process_audio_file_full
+  /// uses), so this always matches what an offline experiment run with the
+  /// same [loss6]/[mode] actually applied. Prefer this over
+  /// [getBandGainsDb]/[getDspParams] for evidence-session metadata; those
+  /// two read live engine state and are wrong if the engine was never
+  /// started or is in a different mode than the experiment used.
+  Map<String, dynamic> getDspConfigForProfile({
+    required List<double> loss6,
+    required int mode,
+    int sampleRate = 48000,
+  }) {
+    if (loss6.length != 6) {
+      throw ArgumentError('loss6 must contain exactly 6 elements');
+    }
+    final Pointer<Float> loss6Ptr = calloc<Float>(6);
+    for (int i = 0; i < 6; i++) {
+      loss6Ptr[i] = loss6[i];
+    }
+    final Pointer<Float> gainsDb = calloc<Float>(6);
+    final Pointer<Float> thrDb = calloc<Float>(6);
+    final Pointer<Float> ratio = calloc<Float>(1);
+    final Pointer<Float> attackMs = calloc<Float>(1);
+    final Pointer<Float> releaseMs = calloc<Float>(1);
+    final Pointer<Float> limiterThr = calloc<Float>(1);
+    final Pointer<Float> wet = calloc<Float>(1);
+    final Pointer<Float> dry = calloc<Float>(1);
+    try {
+      _getDspConfigForProfile(
+        loss6Ptr,
+        mode,
+        sampleRate,
+        gainsDb,
+        thrDb,
+        ratio,
+        attackMs,
+        releaseMs,
+        limiterThr,
+        wet,
+        dry,
+      );
+      return {
+        'gain_db_per_band': List<double>.generate(6, (i) => gainsDb[i]),
+        'threshold_db_per_band': List<double>.generate(6, (i) => thrDb[i]),
+        'ratio': ratio[0],
+        'attack_ms': attackMs[0],
+        'release_ms': releaseMs[0],
+        'limiter_threshold': limiterThr[0],
+        'wet_mix': wet[0],
+        'dry_mix': dry[0],
+      };
+    } finally {
+      calloc.free(loss6Ptr);
+      calloc.free(gainsDb);
+      calloc.free(thrDb);
+      calloc.free(ratio);
+      calloc.free(attackMs);
+      calloc.free(releaseMs);
+      calloc.free(limiterThr);
+      calloc.free(wet);
+      calloc.free(dry);
+    }
+  }
+
+  /// Offline pure-tone/sweep/mode-comparison verification: runs [inPath]
+  /// through a freshly-constructed RealtimeProcessor -- the exact same class
+  /// the live Oboe engine uses -- with [loss6] and [mode], writes
+  /// [outPath], and optionally appends block-aggregated diagnostics to
+  /// [bandLogCsvPath] / [limiterLogCsvPath] (leave null to skip either).
+  /// Returns 0 on success. No microphone or Oboe stream is involved.
+  int processAudioFileFull({
+    required String inPath,
+    required String outPath,
+    required List<double> loss6,
+    required int mode,
+    String? bandLogCsvPath,
+    String? limiterLogCsvPath,
+    String sourceLabel = 'offline',
+  }) {
+    if (loss6.length != 6) {
+      throw ArgumentError('loss6 must contain exactly 6 elements');
+    }
+    final Pointer<Utf8> inPtr = inPath.toNativeUtf8();
+    final Pointer<Utf8> outPtr = outPath.toNativeUtf8();
+    final Pointer<Float> loss6Ptr = calloc<Float>(6);
+    for (int i = 0; i < 6; i++) {
+      loss6Ptr[i] = loss6[i];
+    }
+    final Pointer<Utf8> bandPtr = bandLogCsvPath != null
+        ? bandLogCsvPath.toNativeUtf8()
+        : nullptr;
+    final Pointer<Utf8> limiterPtr = limiterLogCsvPath != null
+        ? limiterLogCsvPath.toNativeUtf8()
+        : nullptr;
+    final Pointer<Utf8> sourcePtr = sourceLabel.toNativeUtf8();
+    try {
+      return _processAudioFileFull(
+        inPtr,
+        outPtr,
+        loss6Ptr,
+        mode,
+        bandPtr,
+        limiterPtr,
+        sourcePtr,
+      );
+    } finally {
+      calloc.free(inPtr);
+      calloc.free(outPtr);
+      calloc.free(loss6Ptr);
+      if (bandPtr != nullptr) calloc.free(bandPtr);
+      if (limiterPtr != nullptr) calloc.free(limiterPtr);
+      calloc.free(sourcePtr);
+    }
+  }
+
+  /// Generates a mono pure-tone WAV for pure-tone DSP verification.
+  int generateToneWav({
+    required String path,
+    required double freqHz,
+    required double durationSec,
+    required int sampleRate,
+    double amplitudeDbFs = -18.0,
+  }) {
+    final Pointer<Utf8> pathPtr = path.toNativeUtf8();
+    try {
+      return _generateToneWav(
+        pathPtr,
+        freqHz,
+        durationSec,
+        sampleRate,
+        amplitudeDbFs,
+      );
+    } finally {
+      calloc.free(pathPtr);
+    }
+  }
+
+  /// Generates a mono logarithmic sine-sweep WAV for frequency-response
+  /// verification.
+  int generateSweepWav({
+    required String path,
+    double f0Hz = 20.0,
+    double f1Hz = 10000.0,
+    double durationSec = 10.0,
+    required int sampleRate,
+    double amplitudeDbFs = -24.0,
+  }) {
+    final Pointer<Utf8> pathPtr = path.toNativeUtf8();
+    try {
+      return _generateSweepWav(
+        pathPtr,
+        f0Hz,
+        f1Hz,
+        durationSec,
+        sampleRate,
+        amplitudeDbFs,
+      );
+    } finally {
+      calloc.free(pathPtr);
+    }
+  }
+
+  /// Generates a synthetic speech+noise WAV for mode-comparison evidence.
+  int generateSyntheticTestWav({
+    required String path,
+    required double durationSec,
+    required int sampleRate,
+  }) {
+    final Pointer<Utf8> pathPtr = path.toNativeUtf8();
+    try {
+      return _generateSyntheticTestWav(pathPtr, durationSec, sampleRate);
+    } finally {
+      calloc.free(pathPtr);
+    }
   }
 }

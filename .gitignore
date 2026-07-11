@@ -1,7 +1,15 @@
+# DSP evidence collection (docs/validation.md) -- generated output, not source
+/cleartone_evidence/
+/raw_files/
+tools/dsp_harness/dsp_harness
+
 # Miscellaneous
 *.class
 *.log
 *.pyc
+__pycache__/
+.pytest_cache/
+.mypy_cache/
 *.swp
 .DS_Store
 .atom/
@@ -74,3 +82,5 @@ linux/flutter/generated_plugins.cmake
 *.pptx#
 
 docs/
+
+.venv/

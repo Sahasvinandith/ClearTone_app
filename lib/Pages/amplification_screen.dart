@@ -11,6 +11,7 @@ import '../audio_engine_ffi.dart';
 import '../audio_generator.dart';
 import '../services/environment_detector.dart';
 import '../amplification_status.dart';
+import 'evidence_screen.dart';
 
 class AmplificationScreen extends StatefulWidget {
   final Profile profile;
@@ -597,6 +598,10 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
             return;
           }
           _audioEngine.updateRtParams(_rtLosses);
+          _audioEngine.evidenceLogGainUpdate(
+            'hearing_profile',
+            _audioEngine.getBandGainsDb(),
+          );
           setState(() {
             _isRtStreaming = true;
           });
@@ -635,6 +640,11 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
     });
     if (_isRtStreaming) {
       _audioEngine.updateRtParams(_rtLosses);
+      // No-op unless an evidence session is active (docs/validation.md Phase 5).
+      _audioEngine.evidenceLogGainUpdate(
+        'manual_slider',
+        _audioEngine.getBandGainsDb(),
+      );
     }
   }
 
@@ -2632,6 +2642,25 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
           ),
         ),
         centerTitle: true,
+        actions: _showRecordTools
+            ? null
+            : [
+                IconButton(
+                  icon: const Icon(Icons.science_outlined),
+                  tooltip: 'DSP evidence collection',
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => EvidenceScreen(
+                          currentLoss6: _rtLosses,
+                          currentMode: _environmentMode,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ],
       ),
       body: SafeArea(
         child: _showRecordTools ? _buildRecordTab() : _buildRealTimeTab(),

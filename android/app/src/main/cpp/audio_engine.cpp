@@ -1,506 +1,18 @@
 #include <oboe/Oboe.h>
 #include <android/log.h>
-#include <algorithm>
 #include <atomic>
-#include <cmath>
 #include <cstdint>
-#include <cstring>
-#include <fstream>
 #include <mutex>
 #include <string>
 #include <time.h>
 #include <vector>
 
+#include "dsp_core.h"
+#include "evidence.h"
+
 #define LOG_TAG "ClearToneEngine"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
-
-// ---- helpers ---------------------------------------------------------------
-
-static inline float clampf(float x, float lo, float hi) {
-    return x < lo ? lo : (x > hi ? hi : x);
-}
-static inline float db_to_lin(float db)  { return std::pow(10.0f, db / 20.0f); }
-static inline float lin_to_db(float lin) { return 20.0f * std::log10(std::max(lin, 1e-12f)); }
-
-static constexpr float kClinicalInterceptDb = 15.70f;
-static constexpr float kClinicalSlope = 0.866f;
-static constexpr float kClinicalTargetDb = 10.0f;
-static constexpr float kMaxMakeupGainDb = 25.0f;
-
-static inline float appThresholdToClinicalDb(float appDb) {
-    return kClinicalInterceptDb + kClinicalSlope * appDb;
-}
-
-static inline float appThresholdToMakeupGainDb(float appDb) {
-    float clinicalDb = appThresholdToClinicalDb(appDb);
-    return clampf(clinicalDb - kClinicalTargetDb, 0.f, kMaxMakeupGainDb);
-}
-
-// ---- Fast math for DSP hot path -------------------------------------------
-// Replace std::log10/std::pow with bit-trick log2/exp2 (~10x faster).
-
-static inline float fast_log2f(float x) {
-    union { float f; int32_t i; } u;
-    u.f = x;
-    float e = (float)((u.i >> 23) - 127);
-    u.i = (u.i & 0x007FFFFF) | 0x3F800000;
-    // Minimax polynomial for log2 on [1,2)
-    return e + (-1.3465551f + u.f * (2.2851935f + u.f * (-0.8543256f)));
-}
-
-static inline float fast_exp2f(float x) {
-    float xi = std::floor(x);
-    float xf = x - xi;
-    union { float f; int32_t i; } u;
-    u.i = ((int32_t)xi + 127) << 23;
-    float p = 1.f + xf * (0.6931472f + xf * (0.2402265f + xf * 0.0555041f));
-    return u.f * p;
-}
-
-// log10(x)*20  →  log2(x)*6.02060
-static inline float fast_lin_to_db(float lin) {
-    return fast_log2f(std::max(lin, 1e-12f)) * 6.02060f;
-}
-// 10^(db/20)  →  2^(db*0.16610)
-static inline float fast_db_to_lin(float db) {
-    return fast_exp2f(db * 0.16609640f);
-}
-
-// ---- Biquad (Butterworth 2nd order) ----------------------------------------
-
-struct Biquad {
-    float b0=1,b1=0,b2=0,a1=0,a2=0,z1=0,z2=0;
-    void reset() { z1 = z2 = 0.f; }
-
-    inline float process(float x) {
-        float y = b0*x + z1;
-        z1 = b1*x - a1*y + z2;
-        z2 = b2*x - a2*y;
-        return y;
-    }
-
-    void setLowpass(float fs, float fc, float Q) {
-        fc = clampf(fc, 10.f, fs*0.45f);
-        Q  = std::max(Q, 0.1f);
-        const float PI = 3.14159265358979f;
-        float w0 = 2.f*PI*(fc/fs), c=std::cos(w0), s=std::sin(w0);
-        float alpha = s/(2.f*Q);
-        float a0n = 1.f+alpha;
-        b0 = (1.f-c)*0.5f / a0n;
-        b1 = (1.f-c)       / a0n;
-        b2 = b0;
-        a1 = -2.f*c         / a0n;
-        a2 = (1.f-alpha)    / a0n;
-    }
-
-    void setHighpass(float fs, float fc, float Q) {
-        fc = clampf(fc, 10.f, fs*0.45f);
-        Q  = std::max(Q, 0.1f);
-        const float PI = 3.14159265358979f;
-        float w0 = 2.f*PI*(fc/fs), c=std::cos(w0), s=std::sin(w0);
-        float alpha = s/(2.f*Q);
-        float a0n = 1.f+alpha;
-        b0 = (1.f+c)*0.5f  / a0n;
-        b1 = -(1.f+c)       / a0n;
-        b2 = b0;
-        a1 = -2.f*c          / a0n;
-        a2 = (1.f-alpha)     / a0n;
-    }
-};
-
-// ---- Linkwitz-Riley 4th order -----------------------------------------------
-
-struct LR4 {
-    Biquad s1, s2;
-    void reset() { s1.reset(); s2.reset(); }
-    inline float process(float x) { return s2.process(s1.process(x)); }
-};
-
-// ---- 6-band crossover -------------------------------------------------------
-
-struct Crossover6 {
-    LR4 lp[5], hp[5];
-
-    void init(float fs, const float edges[5]) {
-        const float Q = 0.70710678f;
-        for (int i = 0; i < 5; i++) {
-            lp[i].s1.setLowpass(fs,  edges[i], Q);
-            lp[i].s2.setLowpass(fs,  edges[i], Q);
-            hp[i].s1.setHighpass(fs, edges[i], Q);
-            hp[i].s2.setHighpass(fs, edges[i], Q);
-            lp[i].reset(); hp[i].reset();
-        }
-    }
-
-    inline void split(float x, float b[6]) {
-        float h1 = hp[0].process(x);
-        float h2 = hp[1].process(h1);
-        float h3 = hp[2].process(h2);
-        float h4 = hp[3].process(h3);
-        b[0] = lp[0].process(x);
-        b[1] = lp[1].process(h1);
-        b[2] = lp[2].process(h2);
-        b[3] = lp[3].process(h3);
-        b[4] = lp[4].process(h4);
-        b[5] = hp[4].process(h4);
-    }
-};
-
-// ---- Per-band compressor ----------------------------------------------------
-
-struct Compressor {
-    float fs=48000.f, thresholdDb=-25.f, ratio=4.f;
-    float attackMs=20.f, releaseMs=250.f, env=0.f;
-    float ac_=0.f, rc_=0.f;  // pre-computed per-sample coefficients
-
-    void updateCoeffs() {
-        ac_ = std::exp(-1.f / (fs * (attackMs  * 0.001f)));
-        rc_ = std::exp(-1.f / (fs * (releaseMs * 0.001f)));
-    }
-
-    void init(float sampleRate) { fs = sampleRate; env = 0.f; updateCoeffs(); }
-
-    inline float process(float x) {
-        float ax = std::fabs(x);
-        env = ax > env ? ac_*env+(1-ac_)*ax : rc_*env+(1-rc_)*ax;
-        float envDb = fast_lin_to_db(env);
-        float gainDb = 0.f;
-        if (envDb > thresholdDb) {
-            float over = envDb - thresholdDb;
-            gainDb = thresholdDb + over/ratio - envDb;
-        }
-        return x * fast_db_to_lin(gainDb);
-    }
-};
-
-// ---- Downward Expander ------------------------------------------------------
-
-struct Expander {
-    float fs=48000.f, thresholdDb=-40.f, ratio=2.f;
-    float attackMs=5.f, releaseMs=100.f, env=0.f;
-    float ac_=0.f, rc_=0.f;
-
-    void updateCoeffs() {
-        ac_ = std::exp(-1.f / (fs * (attackMs  * 0.001f)));
-        rc_ = std::exp(-1.f / (fs * (releaseMs * 0.001f)));
-    }
-
-    void init(float sampleRate) { fs = sampleRate; env = 0.f; updateCoeffs(); }
-
-    inline float process(float x) {
-        float ax = std::fabs(x);
-        env = ax > env ? ac_*env+(1-ac_)*ax : rc_*env+(1-rc_)*ax;
-        float envDb = fast_lin_to_db(env);
-        float gainDb = 0.f;
-        if (envDb < thresholdDb) {
-            float under = thresholdDb - envDb;
-            gainDb = -under * (1.f - 1.f/ratio);
-        }
-        return x * fast_db_to_lin(gainDb);
-    }
-};
-
-// ---- Conversation speech enhancer -----------------------------------------
-
-struct ConversationEnhancer {
-    static constexpr int kBands = 6;
-
-    float fs=48000.f;
-    float power_[kBands];
-    float noise_[kBands];
-    float gain_[kBands];
-    float pAttack_=0.f, pRelease_=0.f;
-    float noiseRise_=0.f, noiseFall_=0.f, noiseHoldRise_=0.f;
-    float gainDown_=0.f, gainUp_=0.f;
-    float ownVoiceGain_=1.f;
-    bool enabled_=true;
-
-    void updateCoeffs() {
-        pAttack_      = std::exp(-1.f / (fs * 0.004f));
-        pRelease_     = std::exp(-1.f / (fs * 0.060f));
-        noiseRise_    = std::exp(-1.f / (fs * 0.350f));
-        noiseFall_    = std::exp(-1.f / (fs * 0.080f));
-        noiseHoldRise_= std::exp(-1.f / (fs * 3.000f));
-        gainDown_     = std::exp(-1.f / (fs * 0.008f));
-        gainUp_       = std::exp(-1.f / (fs * 0.180f));
-    }
-
-    void reset() {
-        for (int i = 0; i < kBands; i++) {
-            power_[i] = 1e-8f;
-            noise_[i] = 1e-7f;
-            gain_[i] = 1.f;
-        }
-        ownVoiceGain_ = 1.f;
-    }
-
-    void init(float sampleRate) {
-        fs = sampleRate;
-        updateCoeffs();
-        reset();
-    }
-
-    inline void process(float b[kBands]) {
-        if (!enabled_) return;
-
-        for (int i = 0; i < kBands; i++) {
-            float p = b[i] * b[i] + 1e-12f;
-            float c = p > power_[i] ? pAttack_ : pRelease_;
-            power_[i] = c * power_[i] + (1.f - c) * p;
-        }
-
-        float voicePower = 0.60f * power_[1] + power_[2] + power_[3] + 0.55f * power_[4];
-        float voiceNoise = 0.60f * noise_[1] + noise_[2] + noise_[3] + 0.55f * noise_[4] + 1e-12f;
-        bool voicePresent = (voicePower / voiceNoise) > 2.2f;
-        float voiceDb = fast_lin_to_db(std::sqrt(voicePower));
-        float ownVoiceAmount = clampf((voiceDb + 36.f) / 16.f, 0.f, 1.f);
-        float ownVoiceTarget = voicePresent ? (1.f - 0.72f * ownVoiceAmount) : 1.f;
-        float ownVoiceCoeff = ownVoiceTarget < ownVoiceGain_ ? gainDown_ : gainUp_;
-        ownVoiceGain_ = ownVoiceCoeff * ownVoiceGain_ + (1.f - ownVoiceCoeff) * ownVoiceTarget;
-
-        static constexpr float minGain[kBands] = {
-            0.12f, 0.22f, 0.30f, 0.30f, 0.24f, 0.16f
-        };
-        static constexpr float speechMinGain[kBands] = {
-            0.12f, 0.55f, 0.68f, 0.68f, 0.58f, 0.16f
-        };
-
-        for (int i = 0; i < kBands; i++) {
-            float n = noise_[i];
-            float p = power_[i];
-            bool speechBand = i >= 1 && i <= 4;
-            bool bandSpeechPresent = speechBand && (voicePresent || (p / (n + 1e-12f)) > 3.5f);
-
-            float nc;
-            if (p < n) {
-                nc = noiseFall_;
-            } else {
-                nc = bandSpeechPresent ? noiseHoldRise_ : noiseRise_;
-            }
-            noise_[i] = nc * n + (1.f - nc) * p;
-            noise_[i] = clampf(noise_[i], 1e-10f, 0.25f);
-
-            float postSnr = p / (noise_[i] + 1e-12f);
-            float wiener = 1.f - (1.f / std::max(postSnr, 1.f));
-            float target = std::sqrt(clampf(wiener, 0.f, 1.f));
-            float floor = bandSpeechPresent ? speechMinGain[i] : minGain[i];
-            target = clampf(target, floor, 1.f);
-
-            float gc = target < gain_[i] ? gainDown_ : gainUp_;
-            gain_[i] = gc * gain_[i] + (1.f - gc) * target;
-            float appliedGain = gain_[i];
-            if (speechBand) {
-                appliedGain *= ownVoiceGain_;
-            }
-            b[i] *= appliedGain;
-        }
-    }
-};
-
-// ---- Soft limiter -----------------------------------------------------------
-
-struct SoftLimiter {
-    float thr=0.95f, strength=10.f;
-    inline float process(float x) const {
-        float ax=std::fabs(x);
-        if (ax <= thr) return x;
-        float s = x >= 0 ? 1.f : -1.f;
-        float ex = ax - thr;
-        return s*(thr + ex/(1.f+strength*ex));
-    }
-};
-
-// ---- Real-time processor ----------------------------------------------------
-
-enum EnvironmentMode {
-    MODE_STANDARD = 0,
-    MODE_TRANSIT = 1,
-    MODE_CONVERSATION = 2
-};
-
-class RealtimeProcessor {
-public:
-    static constexpr int kBands = 6;
-
-    float thresholdDb[kBands] = {-10,-12,-14,-16,-18,-20};
-    float ratio_    = 2.f;
-    float attackMs_ = 5.f;
-    float releaseMs_= 80.f;
-    float makeupLin[kBands];
-    float wet_      = 1.f;
-    float dry_      = 0.f;
-    float masterLin_= 1.f;
-
-    Crossover6  xo_;
-    Compressor  comp_[kBands];
-    Expander    expander_;
-    ConversationEnhancer conversation_;
-    SoftLimiter lim_;
-    EnvironmentMode currentMode_ = MODE_STANDARD;
-
-    RealtimeProcessor() {
-        for (int i = 0; i < kBands; i++) makeupLin[i] = 1.f;
-    }
-
-    void init(float fs) {
-        const float edges[5] = {500,1000,2000,4000,8000};
-        xo_.init(fs, edges);
-        for (int i = 0; i < kBands; i++) {
-            comp_[i].init(fs);
-            comp_[i].ratio       = ratio_;
-            comp_[i].attackMs    = attackMs_;
-            comp_[i].releaseMs   = releaseMs_;
-            comp_[i].thresholdDb = thresholdDb[i];
-            comp_[i].updateCoeffs();
-        }
-        expander_.init(fs);
-        conversation_.init(fs);
-        setMode(currentMode_); // Apply current mode preset
-    }
-
-    void setMode(EnvironmentMode mode) {
-        currentMode_ = mode;
-        if (mode == MODE_TRANSIT) {
-            ratio_ = 8.f;
-            attackMs_ = 2.f;
-            releaseMs_ = 100.f;
-            for (int i = 0; i < kBands; i++) {
-                comp_[i].ratio = ratio_;
-                comp_[i].attackMs = attackMs_;
-                comp_[i].releaseMs = releaseMs_;
-                comp_[i].thresholdDb = -35.f; // more aggressive threshold for transit
-                comp_[i].updateCoeffs();
-            }
-            expander_.ratio = 1.f; // disable expander
-            expander_.updateCoeffs();
-        } else if (mode == MODE_CONVERSATION) {
-            ratio_ = 2.f;
-            attackMs_ = 5.f;
-            releaseMs_ = 80.f;
-            for (int i = 0; i < kBands; i++) {
-                comp_[i].ratio = ratio_;
-                comp_[i].attackMs = attackMs_;
-                comp_[i].releaseMs = releaseMs_;
-                comp_[i].thresholdDb = thresholdDb[i];
-                comp_[i].updateCoeffs();
-            }
-            expander_.ratio = 1.f; // conversation uses multiband suppression instead
-            expander_.updateCoeffs();
-            conversation_.reset();
-        } else {
-            // STANDARD
-            ratio_ = 2.f;
-            attackMs_ = 5.f;
-            releaseMs_ = 80.f;
-            for (int i = 0; i < kBands; i++) {
-                comp_[i].ratio = ratio_;
-                comp_[i].attackMs = attackMs_;
-                comp_[i].releaseMs = releaseMs_;
-                comp_[i].thresholdDb = thresholdDb[i];
-                comp_[i].updateCoeffs();
-            }
-            expander_.ratio = 1.f; // disable expander
-            expander_.updateCoeffs();
-        }
-    }
-
-    // loss6 values are in-app threshold dB. Convert to clinical dB, then add
-    // only the gain needed to bring the clinical threshold down to 10 dB.
-    void updateLoss(const float loss6[kBands]) {
-        for (int i = 0; i < kBands; i++) {
-            float g = appThresholdToMakeupGainDb(loss6[i]);
-            makeupLin[i] = db_to_lin(g);
-        }
-    }
-
-    inline float process(float x) {
-        float b[kBands];
-        xo_.split(x, b);
-        if (currentMode_ == MODE_CONVERSATION) {
-            conversation_.process(b);
-        }
-        float sumOn = 0.f;
-        for (int i = 0; i < kBands; i++) {
-            float gain = makeupLin[i];
-            if (currentMode_ == MODE_CONVERSATION) {
-                if (i == 0) gain *= 0.70f;
-                if (i == 1) gain *= 1.18f;
-                if (i == 2 || i == 3) gain *= 1.35f;
-                if (i == 4) gain *= 1.22f;
-                if (i == 5) gain *= 0.80f;
-            }
-            sumOn += comp_[i].process(b[i]) * gain;
-        }
-        float out = (dry_*x + wet_*sumOn) * masterLin_;
-        return lim_.process(out);
-    }
-};
-
-// ---- WAV helpers (batch processing) ----------------------------------------
-
-static uint32_t read_u32(std::ifstream& f) {
-    uint32_t v; f.read(reinterpret_cast<char*>(&v), 4); return v;
-}
-static uint16_t read_u16(std::ifstream& f) {
-    uint16_t v; f.read(reinterpret_cast<char*>(&v), 2); return v;
-}
-
-struct WavData { int sampleRate=48000; std::vector<float> x; };
-
-static bool read_wav_mono16(const std::string& path, WavData& out) {
-    std::ifstream f(path, std::ios::binary);
-    if (!f) return false;
-    char riff[4]; f.read(riff,4);
-    (void)read_u32(f);
-    char wave[4]; f.read(wave,4);
-    if (std::strncmp(riff,"RIFF",4)||std::strncmp(wave,"WAVE",4)) return false;
-
-    uint16_t fmt=0, ch=0, bps=0; uint32_t sr=0, dataSz=0;
-    std::streampos dataPos=0;
-    while (f && !dataPos) {
-        char id[4]; f.read(id,4); uint32_t sz=read_u32(f); if (!f) break;
-        if (!std::strncmp(id,"fmt ",4)) {
-            fmt=read_u16(f); ch=read_u16(f); sr=read_u32(f);
-            (void)read_u32(f); (void)read_u16(f); bps=read_u16(f);
-            if (sz>16) f.seekg(sz-16,std::ios::cur);
-        } else if (!std::strncmp(id,"data",4)) {
-            dataSz=sz; dataPos=f.tellg(); f.seekg(sz,std::ios::cur);
-        } else f.seekg(sz,std::ios::cur);
-    }
-    if (!dataPos||fmt!=1||ch!=1||bps!=16) return false;
-    out.sampleRate=(int)sr;
-    f.clear(); f.seekg(dataPos);
-    size_t n=dataSz/2; out.x.resize(n);
-    for (size_t i=0;i<n;i++) {
-        int16_t s=0; f.read(reinterpret_cast<char*>(&s),2);
-        out.x[i]=(float)s/32768.f;
-    }
-    return true;
-}
-
-static bool write_wav_mono16(const std::string& path,
-                              const std::vector<float>& x, int sr) {
-    std::ofstream f(path,std::ios::binary); if (!f) return false;
-    uint32_t dataSz=(uint32_t)(x.size()*2), riffSz=36+dataSz;
-    f.write("RIFF",4); f.write(reinterpret_cast<const char*>(&riffSz),4);
-    f.write("WAVE",4); f.write("fmt ",4);
-    uint32_t fmtSz=16; f.write(reinterpret_cast<const char*>(&fmtSz),4);
-    uint16_t af=1,nc=1,bps=16,ba=2; uint32_t sr32=(uint32_t)sr, br=sr32*2;
-    f.write(reinterpret_cast<const char*>(&af),2);
-    f.write(reinterpret_cast<const char*>(&nc),2);
-    f.write(reinterpret_cast<const char*>(&sr32),4);
-    f.write(reinterpret_cast<const char*>(&br),4);
-    f.write(reinterpret_cast<const char*>(&ba),2);
-    f.write(reinterpret_cast<const char*>(&bps),2);
-    f.write("data",4); f.write(reinterpret_cast<const char*>(&dataSz),4);
-    for (float s:x) {
-        s=clampf(s,-1.f,1.f);
-        int16_t v=(int16_t)std::lrintf(s*32767.f);
-        f.write(reinterpret_cast<const char*>(&v),2);
-    }
-    return true;
-}
 
 // ---- Oboe engine ------------------------------------------------------------
 // Two-stream design: separate input/output ManagedStreams.
@@ -568,9 +80,14 @@ public:
     std::atomic<bool>   capturing_{false};
     std::mutex          capMu_;
 
+    // Diagnostic/evidence capture (Phase 1-6 of docs/validation.md). See
+    // evidence.h for the real-time-safety contract of this member.
+    EvidenceSession     evidence_;
+
     oboe::DataCallbackResult onAudioReady(oboe::AudioStream* /*stream*/,
                                           void* audioData,
                                           int32_t numFrames) override {
+        const auto callbackStart = std::chrono::steady_clock::now();
         auto* out = static_cast<float*>(audioData);
 
         // Non-blocking read — fills zeros if input has no data yet (MMAP startup)
@@ -601,8 +118,65 @@ public:
             capIn_.insert(capIn_.end(), out, out + numFrames);
         }
 
+        // Evidence/diagnostic logging is fully opt-in and only active while
+        // an evidence session is running (docs/validation.md Phase 4/6). All
+        // work below is arithmetic-only on stack-local accumulators — no
+        // allocation, no file I/O, no mutex/lock — and pushed into
+        // pre-allocated buffers via EvidenceSession's lock-free API.
+        const bool wantFrameLog = evidence_.isActive() && evidence_.wantsFrameLog();
+        const bool wantBandLog = evidence_.isActive() && evidence_.wantsBandLog();
+        const bool wantLimiterLog = evidence_.isActive() && evidence_.wantsLimiterLog();
+        const bool wantDiag = wantBandLog || wantLimiterLog;
+
+        float rawSumSq = 0.f, rawPeak = 0.f, processedSumSq = 0.f, processedPeak = 0.f;
+        float bandInSumSq[6] = {}, bandInPeak[6] = {}, bandOutSumSq[6] = {}, bandOutPeak[6] = {};
+        float lastEnvDb[6] = {}, lastGainRedDb[6] = {}, lastMakeupDb[6] = {}, lastFinalDb[6] = {};
+        float preLimSumSq = 0.f, preLimPeak = 0.f, postLimSumSq = 0.f, postLimPeak = 0.f;
+        int32_t above095Before = 0, above095After = 0, clippedBefore = 0, clippedAfter = 0;
+        ProcessDiagSample diag;
+
         for (int i = 0; i < numFrames; i++) {
-            out[i] = proc_.process(out[i]);
+            const float x = out[i];
+            if (wantFrameLog) {
+                rawSumSq += x * x;
+                const float ax = std::fabs(x);
+                if (ax > rawPeak) rawPeak = ax;
+            }
+
+            const float y = wantDiag ? proc_.process(x, &diag) : proc_.process(x);
+            out[i] = y;
+
+            if (wantFrameLog) {
+                processedSumSq += y * y;
+                const float ay = std::fabs(y);
+                if (ay > processedPeak) processedPeak = ay;
+            }
+            if (wantBandLog) {
+                for (int b = 0; b < 6; b++) {
+                    bandInSumSq[b] += diag.bandIn[b] * diag.bandIn[b];
+                    const float ain = std::fabs(diag.bandIn[b]);
+                    if (ain > bandInPeak[b]) bandInPeak[b] = ain;
+                    bandOutSumSq[b] += diag.bandOut[b] * diag.bandOut[b];
+                    const float aout = std::fabs(diag.bandOut[b]);
+                    if (aout > bandOutPeak[b]) bandOutPeak[b] = aout;
+                    lastEnvDb[b] = diag.bandEnvDb[b];
+                    lastGainRedDb[b] = diag.bandGainReductionDb[b];
+                    lastMakeupDb[b] = diag.bandMakeupGainDb[b];
+                    lastFinalDb[b] = diag.bandFinalGainDb[b];
+                }
+            }
+            if (wantLimiterLog) {
+                const float pre = std::fabs(diag.preLimiter);
+                const float post = std::fabs(diag.postLimiter);
+                preLimSumSq += diag.preLimiter * diag.preLimiter;
+                if (pre > preLimPeak) preLimPeak = pre;
+                postLimSumSq += diag.postLimiter * diag.postLimiter;
+                if (post > postLimPeak) postLimPeak = post;
+                if (pre > 0.95f) above095Before++;
+                if (post > 0.95f) above095After++;
+                if (pre >= 1.f) clippedBefore++;
+                if (post >= 1.f) clippedAfter++;
+            }
         }
 
         inspectLatencyProbeOutput(out, numFrames, outputStartFrame, probe);
@@ -613,6 +187,65 @@ public:
         if (cap) {
             std::lock_guard<std::mutex> lk(capMu_);
             capOut_.insert(capOut_.end(), out, out + numFrames);
+        }
+
+        if (wantFrameLog || wantBandLog || wantLimiterLog) {
+            const int64_t tsMs = evidenceNowEpochMs();
+            const int32_t modeNow = (int32_t)currentMode_;
+            const int32_t missing = numFrames - got;
+            if (wantFrameLog) {
+                const auto elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                        std::chrono::steady_clock::now() - callbackStart).count();
+                FrameLogRow row;
+                row.timestampMs = tsMs;
+                row.frameIndex = outputStartFrame;
+                row.rawRms = std::sqrt(rawSumSq / numFrames);
+                row.processedRms = std::sqrt(processedSumSq / numFrames);
+                row.rawPeak = rawPeak;
+                row.processedPeak = processedPeak;
+                row.rawDbfs = lin_to_db(row.rawRms);
+                row.processedDbfs = lin_to_db(row.processedRms);
+                row.activeMode = modeNow;
+                row.callbackDurationUs = (int32_t)elapsedUs;
+                row.underrunOrMissingFrames = missing;
+                row.zeroFillCount = missing;
+                evidence_.pushFrameRow(row);
+            }
+            if (wantBandLog) {
+                BandBlockRow row;
+                row.timestampMs = tsMs;
+                row.frameIndex = outputStartFrame;
+                row.activeMode = modeNow;
+                for (int b = 0; b < 6; b++) {
+                    row.inputRms[b] = std::sqrt(bandInSumSq[b] / numFrames);
+                    row.inputPeak[b] = bandInPeak[b];
+                    row.envelopeDb[b] = lastEnvDb[b];
+                    row.thresholdDb[b] = proc_.comp_[b].thresholdDb;
+                    row.ratio[b] = proc_.comp_[b].ratio;
+                    row.gainReductionDb[b] = lastGainRedDb[b];
+                    row.makeupGainDb[b] = lastMakeupDb[b];
+                    row.finalGainDb[b] = lastFinalDb[b];
+                    row.outputRms[b] = std::sqrt(bandOutSumSq[b] / numFrames);
+                    row.outputPeak[b] = bandOutPeak[b];
+                }
+                evidence_.pushBandRow(row);
+            }
+            if (wantLimiterLog) {
+                LimiterLogRow row;
+                row.timestampMs = tsMs;
+                row.frameIndex = outputStartFrame;
+                row.activeMode = modeNow;
+                row.preLimiterPeak = preLimPeak;
+                row.postLimiterPeak = postLimPeak;
+                row.preLimiterRms = std::sqrt(preLimSumSq / numFrames);
+                row.postLimiterRms = std::sqrt(postLimSumSq / numFrames);
+                row.samplesAbove095Before = above095Before;
+                row.samplesAbove095After = above095After;
+                row.samplesClippedBefore = clippedBefore;
+                row.samplesClippedAfter = clippedAfter;
+                row.limiterGainReductionDb = lin_to_db(row.postLimiterRms) - lin_to_db(row.preLimiterRms);
+                evidence_.pushLimiterRow(row);
+            }
         }
 
         return oboe::DataCallbackResult::Continue;
@@ -695,6 +328,13 @@ public:
     }
 
     void setEnvironmentMode(EnvironmentMode mode) {
+        if (mode != currentMode_) {
+            ModeChangeRow row;
+            row.timestampMs = evidenceNowEpochMs();
+            row.fromMode = (int32_t)currentMode_;
+            row.toMode = (int32_t)mode;
+            evidence_.logModeChange(row);
+        }
         currentMode_ = mode;
         proc_.setMode(mode);
         if (running_) {
@@ -1319,6 +959,194 @@ int32_t set_expander_enabled_ffi(int32_t enabled) {
         gEngine.proc_.conversation_.reset();
     }
     return 0;
+}
+
+// ---- Evidence / diagnostic capture FFI (docs/validation.md) ---------------
+// experimentType: 0 live_microphone_test, 1 pure_tone_test, 2 sweep_test,
+//                 3 mode_comparison_test, 4 limiter_test
+// mode: 0 Standard, 1 Transit, 2 Conversation
+
+int32_t evidence_start_ffi(const char* sessionId, int32_t experimentType, int32_t mode,
+                            int32_t durationSeconds, int32_t captureRawProcessed,
+                            int32_t captureBandLog, int32_t captureLimiterLog,
+                            int32_t captureFrameLog) {
+    EvidenceSession::Config cfg;
+    cfg.sessionId = sessionId ? sessionId : "";
+    cfg.experimentType = experimentType;
+    cfg.activeMode = mode;
+    const int32_t sr = gEngine.getInputSampleRate();
+    cfg.sampleRate = sr > 0 ? sr : 48000;
+    cfg.durationSeconds = durationSeconds;
+    cfg.captureBandLog = captureBandLog != 0;
+    cfg.captureLimiterLog = captureLimiterLog != 0;
+    cfg.captureFrameLog = captureFrameLog != 0;
+    gEngine.evidence_.start(cfg);
+
+    if (captureRawProcessed != 0) {
+        std::lock_guard<std::mutex> lk(gEngine.capMu_);
+        gEngine.capIn_.clear();
+        gEngine.capOut_.clear();
+        gEngine.capturing_ = true;
+    }
+    LOGI("Evidence session started: id=%s type=%d mode=%d duration=%ds",
+         cfg.sessionId.c_str(), experimentType, mode, durationSeconds);
+    return 0;
+}
+
+int32_t evidence_stop_ffi() {
+    gEngine.evidence_.stop();
+    gEngine.capturing_ = false;
+    return 0;
+}
+
+// Writes whichever CSVs (into logsDir) and live-capture WAVs (into audioDir)
+// were captured. Both directories must already exist. Only ever performs
+// file I/O on the calling (non-audio) thread. Returns the number of files
+// written, or a negative value on failure.
+int32_t evidence_flush_ffi(const char* logsDir, const char* audioDir) {
+    if (logsDir == nullptr || audioDir == nullptr) return -1;
+    int32_t written = gEngine.evidence_.flush(std::string(logsDir));
+
+    std::lock_guard<std::mutex> lk(gEngine.capMu_);
+    int sr = 48000;
+    if (gEngine.inputStream_) {
+        sr = gEngine.inputStream_->getSampleRate();
+    } else if (gEngine.outputStream_) {
+        sr = gEngine.outputStream_->getSampleRate();
+    }
+    const std::string dir(audioDir);
+    if (!gEngine.capIn_.empty() &&
+        write_wav_mono16(dir + "/live_raw_input.wav", gEngine.capIn_, sr)) {
+        written++;
+    }
+    if (!gEngine.capOut_.empty() &&
+        write_wav_mono16(dir + "/live_processed_output.wav", gEngine.capOut_, sr)) {
+        written++;
+    }
+    return written;
+}
+
+// source: "hearing_profile" / "manual_slider" / "mode_adjustment" / "test_override"
+void evidence_log_gain_update_ffi(const char* source, const float* gainsDb6) {
+    if (gainsDb6 == nullptr) return;
+    GainUpdateRow row;
+    row.timestampMs = evidenceNowEpochMs();
+    row.source = source ? source : "unknown";
+    row.activeMode = (int32_t)gEngine.currentMode_;
+    for (int i = 0; i < 6; i++) {
+        row.gainsDb[i] = gainsDb6[i];
+        row.gainsLinear[i] = db_to_lin(gainsDb6[i]);
+    }
+    gEngine.evidence_.logGainUpdate(row);
+}
+
+// Current per-band makeup gain (dB), derived from the active hearing profile
+// / slider values, for session_config.json / dsp_config.json / gain_profile.csv.
+void get_band_gains_db_ffi(float* outGainsDb6) {
+    if (outGainsDb6 == nullptr) return;
+    for (int i = 0; i < 6; i++) {
+        outGainsDb6[i] = lin_to_db(gEngine.proc_.makeupLin[i]);
+    }
+}
+
+// Current compressor/limiter configuration, for dsp_config.json.
+void get_dsp_params_ffi(float* outThrDb6, float* outRatio, float* outAttackMs,
+                         float* outReleaseMs, float* outLimiterThr,
+                         float* outWet, float* outDry) {
+    if (outThrDb6 != nullptr) {
+        for (int i = 0; i < 6; i++) outThrDb6[i] = gEngine.proc_.comp_[i].thresholdDb;
+    }
+    if (outRatio) *outRatio = gEngine.proc_.ratio_;
+    if (outAttackMs) *outAttackMs = gEngine.proc_.attackMs_;
+    if (outReleaseMs) *outReleaseMs = gEngine.proc_.releaseMs_;
+    if (outLimiterThr) *outLimiterThr = gEngine.proc_.lim_.thr;
+    if (outWet) *outWet = gEngine.proc_.wet_;
+    if (outDry) *outDry = gEngine.proc_.dry_;
+}
+
+// Deterministic dsp_config.json / gain_profile.csv source for a given
+// (loss6, mode) pair, independent of gEngine's live/global state. Builds a
+// fresh RealtimeProcessor exactly like process_audio_file_full_ffi does, so
+// the metadata always matches what the offline experiments actually ran
+// with -- unlike get_band_gains_db_ffi/get_dsp_params_ffi, which read the
+// live engine and are wrong if it was never started or is in a different
+// mode than the one an experiment used.
+void get_dsp_config_for_profile_ffi(
+        const float* loss6, int32_t mode, int32_t sampleRate,
+        float* outGainsDb6, float* outThrDb6,
+        float* outRatio, float* outAttackMs, float* outReleaseMs,
+        float* outLimiterThr, float* outWet, float* outDry) {
+    RealtimeProcessor proc;
+    proc.init((float)(sampleRate > 0 ? sampleRate : 48000));
+    proc.setMode(static_cast<EnvironmentMode>(mode));
+    if (loss6 != nullptr) proc.updateLoss(loss6);
+
+    if (outGainsDb6 != nullptr) {
+        for (int i = 0; i < 6; i++) outGainsDb6[i] = lin_to_db(proc.makeupLin[i]);
+    }
+    if (outThrDb6 != nullptr) {
+        for (int i = 0; i < 6; i++) outThrDb6[i] = proc.comp_[i].thresholdDb;
+    }
+    if (outRatio) *outRatio = proc.ratio_;
+    if (outAttackMs) *outAttackMs = proc.attackMs_;
+    if (outReleaseMs) *outReleaseMs = proc.releaseMs_;
+    if (outLimiterThr) *outLimiterThr = proc.lim_.thr;
+    if (outWet) *outWet = proc.wet_;
+    if (outDry) *outDry = proc.dry_;
+}
+
+// Offline pure-tone / sweep / mode-comparison verification (Phase 7-9): runs
+// inPath through a freshly-constructed RealtimeProcessor — the exact same
+// class the live Oboe engine uses — with the given loss profile and mode,
+// writes outPath, and (if the paths are non-null) writes band_level_log.csv
+// / limiter_log.csv aggregated over ~10ms blocks. No microphone or Oboe
+// stream involved, so this also runs from a host command-line harness.
+int32_t process_audio_file_full_ffi(
+        const char* inPath, const char* outPath,
+        const float* loss6, int32_t mode,
+        const char* bandLogCsvPath, const char* limiterLogCsvPath,
+        const char* sourceLabel) {
+    WavData wav;
+    if (!read_wav_mono16(inPath, wav)) {
+        return 1;
+    }
+
+    RealtimeProcessor proc;
+    proc.init((float)wav.sampleRate);
+    proc.setMode(static_cast<EnvironmentMode>(mode));
+    if (loss6 != nullptr) proc.updateLoss(loss6);
+
+    const bool wantBand = bandLogCsvPath != nullptr;
+    const bool wantLimiter = limiterLogCsvPath != nullptr;
+    const std::string source = sourceLabel ? sourceLabel : "offline";
+    auto result = processWavWithDiagnostics(proc, wav, wantBand, wantLimiter, mode, source);
+
+    if (!write_wav_mono16(outPath, result.processed, wav.sampleRate)) return 2;
+    // append=true: several offline experiment calls (one per pure-tone
+    // frequency, the sweep, each mode) accumulate into the same per-session
+    // band_level_log.csv / limiter_log.csv rather than overwriting each other.
+    if (wantBand) writeBandLogCsv(bandLogCsvPath, result.bandRows, result.bandRows.size(), true);
+    if (wantLimiter) writeLimiterLogCsv(limiterLogCsvPath, result.limiterRows, result.limiterRows.size(), true);
+    return 0;
+}
+
+// Offline test-signal generators (Phase 7-9). One-shot, not called from the
+// audio callback — safe to allocate/write files here.
+int32_t generate_tone_wav_ffi(const char* path, float freqHz, float durationSec,
+                               int32_t sampleRate, float amplitudeDbFs) {
+    auto x = generateToneSignal(freqHz, durationSec, sampleRate, amplitudeDbFs);
+    return write_wav_mono16(path, x, sampleRate) ? 0 : 1;
+}
+
+int32_t generate_sweep_wav_ffi(const char* path, float f0Hz, float f1Hz, float durationSec,
+                                int32_t sampleRate, float amplitudeDbFs) {
+    auto x = generateLogSweepSignal(f0Hz, f1Hz, durationSec, sampleRate, amplitudeDbFs);
+    return write_wav_mono16(path, x, sampleRate) ? 0 : 1;
+}
+
+int32_t generate_synthetic_test_wav_ffi(const char* path, float durationSec, int32_t sampleRate) {
+    auto x = generateSyntheticSpeechNoiseSignal(durationSec, sampleRate);
+    return write_wav_mono16(path, x, sampleRate) ? 0 : 1;
 }
 
 } // extern "C"
