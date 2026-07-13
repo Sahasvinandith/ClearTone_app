@@ -23,8 +23,8 @@ class AmplificationScreen extends StatefulWidget {
 }
 
 class _AmplificationScreenState extends State<AmplificationScreen> {
-  static const double _demoMinLossDb = 0.0;
-  static const double _demoMaxLossDb = 60.0;
+  static const double _demoMinLossDb = -100.0;
+  static const double _demoMaxLossDb = 120.0;
 
   // --- Record Mode State ---
   AudioRecorder _audioRecorder = AudioRecorder();
@@ -38,6 +38,7 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
   String? _currentlyPlayingPath;
   bool _isPlaying = false;
   bool _demoBroadbandMode = true;
+  int _demoEnvironmentMode = 0; // 0=Standard, 1=Transit, 2=Conversation
   bool _isPreparingDemoPlayback = false;
   late List<double> _demoLosses;
   Timer? _demoProcessDebounce;
@@ -411,7 +412,11 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
   }
 
   String get _overlayModeLabel {
-    switch (_environmentMode) {
+    return _environmentModeLabel(_environmentMode);
+  }
+
+  String _environmentModeLabel(int mode) {
+    switch (mode) {
       case 1:
         return 'Transit';
       case 2:
@@ -559,9 +564,25 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
       });
       _publishAmplificationStatus();
     } else {
+      if (!_hasPermission) {
+        await _checkPermissions();
+        if (!_hasPermission) return;
+      }
+
       if (_selectedDeviceId == null) {
+        await _fetchAudioDevices();
+      }
+
+      if (_selectedDeviceId == null) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please select a microphone first.')),
+          SnackBar(
+            content: Text(
+              _audioDevices.isEmpty
+                  ? 'No microphone input sources were found.'
+                  : 'Please select a microphone first.',
+            ),
+          ),
         );
         return;
       }
@@ -1150,7 +1171,8 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
 
   String _demoOutputPath(String inputPath) {
     final suffix = _demoBroadbandMode ? 'broadband' : 'multiband';
-    return inputPath.replaceAll('.wav', '_demo_$suffix.wav');
+    final mode = _environmentModeLabel(_demoEnvironmentMode).toLowerCase();
+    return inputPath.replaceAll('.wav', '_demo_${suffix}_$mode.wav');
   }
 
   void _onDemoModeChanged(bool broadbandMode) {
@@ -1159,6 +1181,14 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
       if (broadbandMode) {
         _demoLosses = List<double>.filled(6, _clampDemoLoss(_demoLosses.first));
       }
+    });
+    _prepareDemoPlayback(restartIfPlaying: _isPlaying);
+  }
+
+  void _onDemoEnvironmentModeChanged(int mode) {
+    if (_demoEnvironmentMode == mode) return;
+    setState(() {
+      _demoEnvironmentMode = mode;
     });
     _prepareDemoPlayback(restartIfPlaying: _isPlaying);
   }
@@ -1219,10 +1249,12 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
         await _audioPlayer.stop();
       }
 
-      final result = _audioEngine.processAudio(
+      final result = _audioEngine.processAudioFileFull(
         inPath: inputPath,
         outPath: outPath,
-        loss6: _demoLosses,
+        loss6: _clampDemoLosses(_demoLosses),
+        mode: _demoEnvironmentMode,
+        sourceLabel: 'recording_demo',
       );
       if (result != 0) {
         throw Exception('Audio engine returned error code: $result');
@@ -1651,6 +1683,52 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
                             ),
                           ),
                           const SizedBox(height: 16),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF282828),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: const Color(0xFF333333),
+                              ),
+                            ),
+                            child: DropdownButtonHideUnderline(
+                              child: DropdownButton<int>(
+                                value: _demoEnvironmentMode,
+                                dropdownColor: const Color(0xFF282828),
+                                isExpanded: true,
+                                icon: const Icon(
+                                  Icons.keyboard_arrow_down,
+                                  color: Color(0xFFD4AF37),
+                                ),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                items: const [
+                                  DropdownMenuItem(
+                                    value: 0,
+                                    child: Text('Standard Mode'),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 1,
+                                    child: Text('Transit Mode'),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 2,
+                                    child: Text('Conversation Mode'),
+                                  ),
+                                ],
+                                onChanged: (value) {
+                                  if (value != null) {
+                                    _onDemoEnvironmentModeChanged(value);
+                                  }
+                                },
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
                           ...List.generate(_rtBandLabels.length, (bandIndex) {
                             return _buildDemoGainSlider(bandIndex);
                           }),
@@ -1748,7 +1826,7 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
                 value: value,
                 min: _demoMinLossDb,
                 max: _demoMaxLossDb,
-                divisions: 60,
+                divisions: 22,
                 label: '${value.round()} dB',
                 onChanged: (newValue) => _onDemoLossChanged(index, newValue),
               ),
@@ -1799,21 +1877,20 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
                 ),
                 const SizedBox(height: 32),
 
-                // Device Selector
-                if (Platform.isAndroid && _audioDevices.isNotEmpty)
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      const Text(
-                        'INPUT SOURCE',
-                        style: TextStyle(
-                          color: Color(0xFF666666),
-                          fontSize: 12,
-                          letterSpacing: 1.2,
-                          fontWeight: FontWeight.bold,
-                        ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text(
+                      'INPUT SOURCE',
+                      style: TextStyle(
+                        color: Color(0xFF666666),
+                        fontSize: 12,
+                        letterSpacing: 1.2,
+                        fontWeight: FontWeight.bold,
                       ),
-                      const SizedBox(height: 8),
+                    ),
+                    const SizedBox(height: 8),
+                    if (Platform.isAndroid && _audioDevices.isNotEmpty)
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         decoration: BoxDecoration(
@@ -1849,399 +1926,110 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
                                   },
                           ),
                         ),
-                      ),
-                      if (_isRtStreaming)
-                        const Padding(
-                          padding: EdgeInsets.only(top: 8.0),
-                          child: Text(
-                            'Stop streaming to change microphone.',
-                            style: TextStyle(
-                              color: Colors.redAccent,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                      const SizedBox(height: 24),
-
-                      // Environment Auto-Detect Toggle
-                      const Text(
-                        'ENVIRONMENT AUTO-DETECT',
-                        style: TextStyle(
-                          color: Color(0xFF666666),
-                          fontSize: 12,
-                          letterSpacing: 1.2,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
+                      )
+                    else
                       Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 16,
-                          vertical: 10,
+                          vertical: 12,
                         ),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF282828),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: _envDetectEnabled
-                                ? const Color(0xFFD4AF37).withValues(alpha: 0.5)
-                                : const Color(0xFF333333),
-                          ),
-                        ),
-                        child: Column(
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text(
-                                      'Auto Mode Switching',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 14,
-                                      ),
-                                    ),
-                                    Text(
-                                      _envDetectEnabled
-                                          ? 'Detecting environment...'
-                                          : 'Tap to enable adaptive modes',
-                                      style: const TextStyle(
-                                        color: Colors.white54,
-                                        fontSize: 11,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                Switch(
-                                  value: _envDetectEnabled,
-                                  activeThumbColor: const Color(0xFFD4AF37),
-                                  onChanged: (value) =>
-                                      _toggleEnvDetection(value),
-                                ),
-                              ],
-                            ),
-                            if (_envDetectEnabled) ...[
-                              const SizedBox(height: 12),
-                              const Divider(
-                                color: Color(0xFF333333),
-                                height: 1,
-                              ),
-                              const SizedBox(height: 12),
-                              // Detected environment indicator
-                              Row(
-                                children: [
-                                  Container(
-                                    width: 8,
-                                    height: 8,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color:
-                                          _detectedEnvironment.isEmpty ||
-                                              _detectedEnvironment ==
-                                                  'Initializing'
-                                          ? Colors.grey
-                                          : _detectedEnvironment ==
-                                                'Conversation'
-                                          ? Colors.greenAccent
-                                          : _detectedEnvironment ==
-                                                'Transportation'
-                                          ? Colors.orangeAccent
-                                          : Colors.blueAccent,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    _detectedEnvironment.isEmpty
-                                        ? 'Waiting for data...'
-                                        : _environmentDisplayLabel(
-                                            _detectedEnvironment,
-                                          ),
-                                    style: const TextStyle(
-                                      color: Colors.white70,
-                                      fontSize: 13,
-                                    ),
-                                  ),
-                                  if (_detectedEnvironment.isNotEmpty &&
-                                      _detectedEnvironment != 'Initializing' &&
-                                      _detectedEnvironment != 'Silence') ...[
-                                    const Spacer(),
-                                    Text(
-                                      '${(_detectedConfidence * 100).toStringAsFixed(0)}%',
-                                      style: const TextStyle(
-                                        color: Color(0xFFD4AF37),
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                              const SizedBox(height: 10),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 10,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF1F1F1F),
-                                  borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(
-                                    color: const Color(0xFF333333),
-                                  ),
-                                ),
-                                child: Row(
-                                  children: [
-                                    Expanded(
-                                      child: _buildEnvMetric(
-                                        'CONF',
-                                        '${(_detectedConfidence * 100).toStringAsFixed(1)}%',
-                                      ),
-                                    ),
-                                    Container(
-                                      width: 1,
-                                      height: 26,
-                                      color: const Color(0xFF333333),
-                                    ),
-                                    Expanded(
-                                      child: _buildEnvMetric(
-                                        'RMS',
-                                        _detectedRms.toStringAsFixed(5),
-                                      ),
-                                    ),
-                                    Container(
-                                      width: 1,
-                                      height: 26,
-                                      color: const Color(0xFF333333),
-                                    ),
-                                    Expanded(
-                                      child: _buildEnvMetric(
-                                        'P(CONV)',
-                                        _detectedRawProb.toStringAsFixed(3),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              // Silence Threshold input
-                              Row(
-                                children: [
-                                  const SizedBox(
-                                    width: 110,
-                                    child: Text(
-                                      'Silence Threshold',
-                                      style: TextStyle(
-                                        color: Colors.white54,
-                                        fontSize: 11,
-                                      ),
-                                    ),
-                                  ),
-                                  Expanded(
-                                    child: TextField(
-                                      controller:
-                                          _envSilenceThresholdController,
-                                      keyboardType:
-                                          const TextInputType.numberWithOptions(
-                                            decimal: true,
-                                          ),
-                                      inputFormatters: [
-                                        FilteringTextInputFormatter.allow(
-                                          RegExp(r'[0-9.]'),
-                                        ),
-                                      ],
-                                      onChanged: _onSilenceThresholdTextChanged,
-                                      style: const TextStyle(
-                                        color: Color(0xFFD4AF37),
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                      decoration: InputDecoration(
-                                        isDense: true,
-                                        contentPadding:
-                                            const EdgeInsets.symmetric(
-                                              horizontal: 12,
-                                              vertical: 10,
-                                            ),
-                                        filled: true,
-                                        fillColor: const Color(0xFF1F1F1F),
-                                        hintText: '0.007',
-                                        hintStyle: const TextStyle(
-                                          color: Colors.white30,
-                                        ),
-                                        enabledBorder: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            8,
-                                          ),
-                                          borderSide: const BorderSide(
-                                            color: Color(0xFF333333),
-                                          ),
-                                        ),
-                                        focusedBorder: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            8,
-                                          ),
-                                          borderSide: const BorderSide(
-                                            color: Color(0xFFD4AF37),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              // Hop Size slider
-                              Row(
-                                children: [
-                                  const SizedBox(
-                                    width: 110,
-                                    child: Text(
-                                      'Hop Size (s)',
-                                      style: TextStyle(
-                                        color: Colors.white54,
-                                        fontSize: 11,
-                                      ),
-                                    ),
-                                  ),
-                                  Expanded(
-                                    child: SliderTheme(
-                                      data: SliderThemeData(
-                                        activeTrackColor: const Color(
-                                          0xFFD4AF37,
-                                        ),
-                                        inactiveTrackColor: const Color(
-                                          0xFF444444,
-                                        ),
-                                        thumbColor: const Color(0xFFD4AF37),
-                                        overlayColor: const Color(
-                                          0xFFD4AF37,
-                                        ).withValues(alpha: 0.15),
-                                        trackHeight: 3,
-                                      ),
-                                      child: Slider(
-                                        value: _envHopSize,
-                                        min: 0.5,
-                                        max: 5.0,
-                                        divisions: 9,
-                                        onChanged: (v) {
-                                          setState(() => _envHopSize = v);
-                                          _envDetector?.hopSeconds = v;
-                                        },
-                                      ),
-                                    ),
-                                  ),
-                                  SizedBox(
-                                    width: 40,
-                                    child: Text(
-                                      '${_envHopSize.toStringAsFixed(1)}s',
-                                      textAlign: TextAlign.right,
-                                      style: const TextStyle(
-                                        color: Color(0xFFD4AF37),
-                                        fontSize: 11,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-
-                      // Environment Mode Toggle
-                      const Text(
-                        'ENVIRONMENT MODE',
-                        style: TextStyle(
-                          color: Color(0xFF666666),
-                          fontSize: 12,
-                          letterSpacing: 1.2,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      if (_envDetectEnabled)
-                        const Text(
-                          'Controlled automatically by detector',
-                          style: TextStyle(
-                            color: Color(0xFFD4AF37),
-                            fontSize: 10,
-                          ),
-                        ),
-                      const SizedBox(height: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
                         decoration: BoxDecoration(
                           color: const Color(0xFF282828),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(color: const Color(0xFF333333)),
                         ),
-                        child: DropdownButtonHideUnderline(
-                          child: DropdownButton<int>(
-                            value: _environmentMode,
-                            dropdownColor: const Color(0xFF282828),
-                            isExpanded: true,
-                            icon: const Icon(
-                              Icons.keyboard_arrow_down,
-                              color: Color(0xFFD4AF37),
+                        child: Row(
+                          children: [
+                            const Expanded(
+                              child: Text(
+                                'No microphone sources loaded',
+                                style: TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 13,
+                                ),
+                              ),
                             ),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 14,
+                            TextButton(
+                              onPressed: _isRtStreaming
+                                  ? null
+                                  : () async {
+                                      if (!_hasPermission) {
+                                        await _checkPermissions();
+                                      }
+                                      if (_hasPermission) {
+                                        await _fetchAudioDevices();
+                                      }
+                                    },
+                              child: const Text('Refresh'),
                             ),
-                            items: const [
-                              DropdownMenuItem(
-                                value: 0,
-                                child: Text('Standard Mode'),
-                              ),
-                              DropdownMenuItem(
-                                value: 1,
-                                child: Text('Transit Mode'),
-                              ),
-                              DropdownMenuItem(
-                                value: 2,
-                                child: Text('Conversation Mode'),
-                              ),
-                            ],
-                            onChanged: _envDetectEnabled
-                                ? null
-                                : (value) {
-                                    if (value != null) {
-                                      _onEnvironmentModeChanged(value);
-                                    }
-                                  },
+                          ],
+                        ),
+                      ),
+                    if (!Platform.isAndroid)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 8.0),
+                        child: Text(
+                          'Real-time microphone selection is available on Android builds.',
+                          style: TextStyle(color: Colors.white54, fontSize: 12),
+                        ),
+                      ),
+                    if (_isRtStreaming)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 8.0),
+                        child: Text(
+                          'Stop streaming to change microphone.',
+                          style: TextStyle(
+                            color: Colors.redAccent,
+                            fontSize: 12,
                           ),
                         ),
                       ),
-                      if (_environmentMode == 2) ...[
-                        const SizedBox(height: 12),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 10,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF282828),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: const Color(0xFF333333)),
-                          ),
-                          child: Row(
+                    const SizedBox(height: 24),
+
+                    // Environment Auto-Detect Toggle
+                    const Text(
+                      'ENVIRONMENT AUTO-DETECT',
+                      style: TextStyle(
+                        color: Color(0xFF666666),
+                        fontSize: 12,
+                        letterSpacing: 1.2,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF282828),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: _envDetectEnabled
+                              ? const Color(0xFFD4AF37).withValues(alpha: 0.5)
+                              : const Color(0xFF333333),
+                        ),
+                      ),
+                      child: Column(
+                        children: [
+                          Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   const Text(
-                                    'Own-Voice Suppression',
+                                    'Auto Mode Switching',
                                     style: TextStyle(
                                       color: Colors.white,
                                       fontSize: 14,
                                     ),
                                   ),
                                   Text(
-                                    _expanderEnabled
-                                        ? 'ON - reduces speech feedback'
-                                        : 'OFF - bypassed for testing',
+                                    _envDetectEnabled
+                                        ? 'Detecting environment...'
+                                        : 'Tap to enable adaptive modes',
                                     style: const TextStyle(
                                       color: Colors.white54,
                                       fontSize: 11,
@@ -2250,34 +2038,299 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
                                 ],
                               ),
                               Switch(
-                                value: _expanderEnabled,
+                                value: _envDetectEnabled,
                                 activeThumbColor: const Color(0xFFD4AF37),
-                                onChanged: (value) {
-                                  setState(() => _expanderEnabled = value);
-                                  _audioEngine.setExpanderEnabled(value);
-                                },
+                                onChanged: (value) =>
+                                    _toggleEnvDetection(value),
                               ),
                             ],
                           ),
-                        ),
-                      ],
-                      const SizedBox(height: 24),
+                          if (_envDetectEnabled) ...[
+                            const SizedBox(height: 12),
+                            const Divider(color: Color(0xFF333333), height: 1),
+                            const SizedBox(height: 12),
+                            // Detected environment indicator
+                            Row(
+                              children: [
+                                Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color:
+                                        _detectedEnvironment.isEmpty ||
+                                            _detectedEnvironment ==
+                                                'Initializing'
+                                        ? Colors.grey
+                                        : _detectedEnvironment == 'Conversation'
+                                        ? Colors.greenAccent
+                                        : _detectedEnvironment ==
+                                              'Transportation'
+                                        ? Colors.orangeAccent
+                                        : Colors.blueAccent,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  _detectedEnvironment.isEmpty
+                                      ? 'Waiting for data...'
+                                      : _environmentDisplayLabel(
+                                          _detectedEnvironment,
+                                        ),
+                                  style: const TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                                if (_detectedEnvironment.isNotEmpty &&
+                                    _detectedEnvironment != 'Initializing' &&
+                                    _detectedEnvironment != 'Silence') ...[
+                                  const Spacer(),
+                                  Text(
+                                    '${(_detectedConfidence * 100).toStringAsFixed(0)}%',
+                                    style: const TextStyle(
+                                      color: Color(0xFFD4AF37),
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 10,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF1F1F1F),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: const Color(0xFF333333),
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: _buildEnvMetric(
+                                      'CONF',
+                                      '${(_detectedConfidence * 100).toStringAsFixed(1)}%',
+                                    ),
+                                  ),
+                                  Container(
+                                    width: 1,
+                                    height: 26,
+                                    color: const Color(0xFF333333),
+                                  ),
+                                  Expanded(
+                                    child: _buildEnvMetric(
+                                      'RMS',
+                                      _detectedRms.toStringAsFixed(5),
+                                    ),
+                                  ),
+                                  Container(
+                                    width: 1,
+                                    height: 26,
+                                    color: const Color(0xFF333333),
+                                  ),
+                                  Expanded(
+                                    child: _buildEnvMetric(
+                                      'P(CONV)',
+                                      _detectedRawProb.toStringAsFixed(3),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            // Silence Threshold input
+                            Row(
+                              children: [
+                                const SizedBox(
+                                  width: 110,
+                                  child: Text(
+                                    'Silence Threshold',
+                                    style: TextStyle(
+                                      color: Colors.white54,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  child: TextField(
+                                    controller: _envSilenceThresholdController,
+                                    keyboardType:
+                                        const TextInputType.numberWithOptions(
+                                          decimal: true,
+                                        ),
+                                    inputFormatters: [
+                                      FilteringTextInputFormatter.allow(
+                                        RegExp(r'[0-9.]'),
+                                      ),
+                                    ],
+                                    onChanged: _onSilenceThresholdTextChanged,
+                                    style: const TextStyle(
+                                      color: Color(0xFFD4AF37),
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                    decoration: InputDecoration(
+                                      isDense: true,
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 10,
+                                          ),
+                                      filled: true,
+                                      fillColor: const Color(0xFF1F1F1F),
+                                      hintText: '0.007',
+                                      hintStyle: const TextStyle(
+                                        color: Colors.white30,
+                                      ),
+                                      enabledBorder: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                        borderSide: const BorderSide(
+                                          color: Color(0xFF333333),
+                                        ),
+                                      ),
+                                      focusedBorder: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                        borderSide: const BorderSide(
+                                          color: Color(0xFFD4AF37),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            // Hop Size slider
+                            Row(
+                              children: [
+                                const SizedBox(
+                                  width: 110,
+                                  child: Text(
+                                    'Hop Size (s)',
+                                    style: TextStyle(
+                                      color: Colors.white54,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  child: SliderTheme(
+                                    data: SliderThemeData(
+                                      activeTrackColor: const Color(0xFFD4AF37),
+                                      inactiveTrackColor: const Color(
+                                        0xFF444444,
+                                      ),
+                                      thumbColor: const Color(0xFFD4AF37),
+                                      overlayColor: const Color(
+                                        0xFFD4AF37,
+                                      ).withValues(alpha: 0.15),
+                                      trackHeight: 3,
+                                    ),
+                                    child: Slider(
+                                      value: _envHopSize,
+                                      min: 0.5,
+                                      max: 5.0,
+                                      divisions: 9,
+                                      onChanged: (v) {
+                                        setState(() => _envHopSize = v);
+                                        _envDetector?.hopSeconds = v;
+                                      },
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(
+                                  width: 40,
+                                  child: Text(
+                                    '${_envHopSize.toStringAsFixed(1)}s',
+                                    textAlign: TextAlign.right,
+                                    style: const TextStyle(
+                                      color: Color(0xFFD4AF37),
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 24),
 
-                      // Audio Mode Toggle
+                    // Environment Mode Toggle
+                    const Text(
+                      'ENVIRONMENT MODE',
+                      style: TextStyle(
+                        color: Color(0xFF666666),
+                        fontSize: 12,
+                        letterSpacing: 1.2,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    if (_envDetectEnabled)
                       const Text(
-                        'AUDIO MODE',
+                        'Controlled automatically by detector',
                         style: TextStyle(
-                          color: Color(0xFF666666),
-                          fontSize: 12,
-                          letterSpacing: 1.2,
-                          fontWeight: FontWeight.bold,
+                          color: Color(0xFFD4AF37),
+                          fontSize: 10,
                         ),
                       ),
-                      const SizedBox(height: 8),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF282828),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFF333333)),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<int>(
+                          value: _environmentMode,
+                          dropdownColor: const Color(0xFF282828),
+                          isExpanded: true,
+                          icon: const Icon(
+                            Icons.keyboard_arrow_down,
+                            color: Color(0xFFD4AF37),
+                          ),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: 0,
+                              child: Text('Standard Mode'),
+                            ),
+                            DropdownMenuItem(
+                              value: 1,
+                              child: Text('Transit Mode'),
+                            ),
+                            DropdownMenuItem(
+                              value: 2,
+                              child: Text('Conversation Mode'),
+                            ),
+                          ],
+                          onChanged: _envDetectEnabled
+                              ? null
+                              : (value) {
+                                  if (value != null) {
+                                    _onEnvironmentModeChanged(value);
+                                  }
+                                },
+                        ),
+                      ),
+                    ),
+                    if (_environmentMode == 2) ...[
+                      const SizedBox(height: 12),
                       Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 16,
-                          vertical: 8,
+                          vertical: 10,
                         ),
                         decoration: BoxDecoration(
                           color: const Color(0xFF282828),
@@ -2290,19 +2343,17 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  _isCommunicationMode
-                                      ? 'Communication Mode'
-                                      : 'Media Mode',
-                                  style: const TextStyle(
+                                const Text(
+                                  'Own-Voice Suppression',
+                                  style: TextStyle(
                                     color: Colors.white,
                                     fontSize: 14,
                                   ),
                                 ),
                                 Text(
-                                  _isCommunicationMode
-                                      ? 'Used for Bluetooth Headsets (SCO)'
-                                      : 'Better for Wired / Phone Speaker',
+                                  _expanderEnabled
+                                      ? 'ON - reduces speech feedback'
+                                      : 'OFF - bypassed for testing',
                                   style: const TextStyle(
                                     color: Colors.white54,
                                     fontSize: 11,
@@ -2311,21 +2362,82 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
                               ],
                             ),
                             Switch(
-                              value: _isCommunicationMode,
+                              value: _expanderEnabled,
                               activeThumbColor: const Color(0xFFD4AF37),
-                              onChanged: _isRtStreaming
-                                  ? null
-                                  : (value) {
-                                      setState(() {
-                                        _isCommunicationMode = value;
-                                      });
-                                    },
+                              onChanged: (value) {
+                                setState(() => _expanderEnabled = value);
+                                _audioEngine.setExpanderEnabled(value);
+                              },
                             ),
                           ],
                         ),
                       ),
                     ],
-                  ),
+                    const SizedBox(height: 24),
+
+                    // Audio Mode Toggle
+                    const Text(
+                      'AUDIO MODE',
+                      style: TextStyle(
+                        color: Color(0xFF666666),
+                        fontSize: 12,
+                        letterSpacing: 1.2,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF282828),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFF333333)),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _isCommunicationMode
+                                    ? 'Communication Mode'
+                                    : 'Media Mode',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              Text(
+                                _isCommunicationMode
+                                    ? 'Used for Bluetooth Headsets (SCO)'
+                                    : 'Better for Wired / Phone Speaker',
+                                style: const TextStyle(
+                                  color: Colors.white54,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
+                          ),
+                          Switch(
+                            value: _isCommunicationMode,
+                            activeThumbColor: const Color(0xFFD4AF37),
+                            onChanged: _isRtStreaming
+                                ? null
+                                : (value) {
+                                    setState(() {
+                                      _isCommunicationMode = value;
+                                    });
+                                  },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
 
                 const SizedBox(height: 48),
 
