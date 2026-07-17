@@ -4,6 +4,7 @@ import 'package:record/record.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:io';
 import 'dart:async';
 import '../models/profile.dart';
@@ -25,6 +26,9 @@ class AmplificationScreen extends StatefulWidget {
 class _AmplificationScreenState extends State<AmplificationScreen> {
   static const double _demoMinLossDb = -100.0;
   static const double _demoMaxLossDb = 120.0;
+  static const double _defaultEnvSilenceThreshold = 0.007;
+  static const String _envSilenceThresholdPrefsKey =
+      'amplification_env_silence_threshold';
 
   // --- Record Mode State ---
   AudioRecorder _audioRecorder = AudioRecorder();
@@ -70,7 +74,7 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
 
   // --- Environment Auto-Detection State ---
   bool _envDetectEnabled = false;
-  double _envSilenceThreshold = 0.007;
+  double _envSilenceThreshold = _defaultEnvSilenceThreshold;
   late final TextEditingController _envSilenceThresholdController;
   double _envHopSize = 1.0;
   EnvironmentDetectorService? _envDetector;
@@ -122,6 +126,7 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
     _envSilenceThresholdController = TextEditingController(
       text: _envSilenceThreshold.toStringAsFixed(3),
     );
+    unawaited(_loadSavedEnvSilenceThreshold());
     _initRtGainFromProfile();
     _demoLosses = _clampDemoLosses(_rtLosses);
     _startReconnectTimer();
@@ -197,6 +202,24 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
         _publishAmplificationStatus();
       }
     }
+  }
+
+  Future<void> _loadSavedEnvSilenceThreshold() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getDouble(_envSilenceThresholdPrefsKey);
+    if (saved == null || !saved.isFinite || saved <= 0) return;
+    if (!mounted) return;
+
+    setState(() {
+      _envSilenceThreshold = saved;
+      _envSilenceThresholdController.text = saved.toStringAsFixed(3);
+    });
+    _envDetector?.silenceThreshold = saved;
+  }
+
+  Future<void> _saveEnvSilenceThreshold(double value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_envSilenceThresholdPrefsKey, value);
   }
 
   void _publishAmplificationStatus() {
@@ -701,6 +724,7 @@ class _AmplificationScreenState extends State<AmplificationScreen> {
       _envSilenceThreshold = parsed;
     });
     _envDetector?.silenceThreshold = parsed;
+    unawaited(_saveEnvSilenceThreshold(parsed));
   }
 
   Future<void> _verifyInputFeed() async {
